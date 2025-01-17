@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const connectDB = require('./models/connexion');
-const authenticateToken = require('./middleware/authenticateToken'); 
+const authenticateToken = require('./middleware/authenticateToken');
 const clientRoutes = require('./routes/clientRoutes');
 const prestationRoutes = require('./routes/prestationRoutes');
 const factureRoutes = require('./routes/factureRoutes');
@@ -24,7 +24,10 @@ connectDB();
 
 // Configuration de CORS
 app.use(cors({
-  origin: 'http://localhost:3000',
+  origin: [
+    'http://localhost:3000',
+    'https://freelance-frontend-cyan.vercel.app'
+  ],
   credentials: true,
   allowedHeaders: ['Content-Type', 'Authorization'],
   exposedHeaders: ['Authorization']
@@ -33,6 +36,17 @@ app.use(cors({
 // Middleware pour parser les requêtes JSON
 app.use(express.json());
 
+
+app.use((req, res, next) => {
+  res.setHeader(
+    "Content-Security-Policy",
+    "default-src 'self'; font-src 'self'; img-src 'self' https://freelance-backend-y15a.onrender.com; script-src 'self'; style-src 'self' 'unsafe-inline'; frame-src 'self' https://freelance-backend-y15a.onrender.com"
+  );
+  next();
+});
+
+
+/*
 // Configuration CSP
 app.use((req, res, next) => {
   res.setHeader(
@@ -41,7 +55,7 @@ app.use((req, res, next) => {
   );
   next();
 });
-
+*/
 
 // Routes Publiques
 app.use('/api/auth', authRoutes);
@@ -63,8 +77,8 @@ app.use('/uploads', express.static(path.join(__dirname, 'public/uploads')));
 
 
 // Dans server.js, après la définition de toutes vos routes
-app._router.stack.forEach(function(r){
-  if (r.route && r.route.path){
+app._router.stack.forEach(function (r) {
+  if (r.route && r.route.path) {
     console.log('Route:', r.route.path)
   }
 });
