@@ -8,6 +8,8 @@ const authenticateToken = async (req, res, next) => {
     const authHeader = req.headers['authorization'];
     //console.log('Header Authorization brut:', authHeader);
 
+    
+
     if (!authHeader) {
       console.log('Token manquant');
       return res.status(401).json({ message: 'Token manquant' });
@@ -19,11 +21,11 @@ const authenticateToken = async (req, res, next) => {
     }
 
     const token = authHeader.split(' ')[1];
-    //console.log('Token extrait:', token);
+    console.log('Token extrait:', token);
 
     try {
       const user = await jwtVerify(token, process.env.JWT_SECRET);
-      //console.log('Token validé avec succès');
+      console.log('Token validé avec succès - Utilisateur:', user._id);
       req.user = user;
       next();
     } catch (err) {

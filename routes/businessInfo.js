@@ -32,9 +32,16 @@ router.get('/', async (req, res) => {
   try {
     const userId = req.user._id;
     const businessInfo = await BusinessInfo.findOne({ user: userId });
+
+    console.log('Requête GET /api/business-info - Utilisateur:', userId);
+
+
     if (!businessInfo) {
+      console.log('Informations de l\'entreprise non trouvées pour l\'utilisateur:', userId);
       return res.json({});
     }
+
+    console.log('Informations de l\'entreprise récupérées pour l\'utilisateur:', userId);
     res.json(businessInfo);
   } catch (error) {
     console.error('Erreur lors de la récupération des informations:', error);

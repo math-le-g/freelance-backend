@@ -10,9 +10,14 @@ router.get('/', async (req, res) => {
     const userId = req.user._id;
     const businessInfo = await BusinessInfo.findOne({ user: userId });
 
+    console.log('Requête GET /api/invoice-settings - Utilisateur:', userId);
+
     if (!businessInfo) {
+      console.log('Informations de l\'entreprise non trouvées pour l\'utilisateur:', userId);
       return res.status(404).json({ message: 'Informations de l\'entreprise non trouvées.' });
     }
+
+    console.log('Paramètres de facturation récupérés pour l\'utilisateur:', userId);
 
     res.json({
       invoiceTitle: businessInfo.invoiceTitle,
@@ -79,6 +84,8 @@ router.get('/last-number', async (req, res) => {
     const userId = req.user._id;
     const lastInvoice = await Facture.findOne({ user: userId }).sort({ invoiceNumber: -1 });
     const lastInvoiceNumber = lastInvoice ? lastInvoice.invoiceNumber : 0;
+    
+    console.log('Dernier numéro de facture récupéré pour l\'utilisateur:', userId);
     res.json({ lastInvoiceNumber });
   } catch (error) {
     console.error('Erreur lors de la récupération du dernier numéro de facture:', error);
