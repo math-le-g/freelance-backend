@@ -178,12 +178,65 @@ const generateInvoicePDF = async (facture, client, businessInfo, prestations) =>
         return parseDate(b) - parseDate(a);
       });
 
-      // Affichage des lignes du tableau
+      // Parcourir chaque date et afficher ses prestations
       sortedDateKeys.forEach((date) => {
         const datePrestations = prestationsByDate[date];
+
         const prestationsText = datePrestations
-          .map(p => `${formatHours(p.hours)} de ${p.description}`)
+          .map((p) => {
+            if (p.billingType === 'hourly') {
+              // Ex: "2h30 de Massage"
+              const duration = formatHours(p.hours);
+              return `${duration} de ${p.description}`;
+            } else {
+              // Forfait
+              const quantity = p.quantity ?? 1;
+              const pluralSuffix = quantity > 1 ? 's' : '';
+              const baseWord = p.description + pluralSuffix; // ex: "massages"
+
+              let durationStr = '';
+              const totalMin = p.duration || 0;
+
+              if (p.durationUnit === 'minutes') {
+                durationStr = `${totalMin}min`; // ex: "80min"
+              } else if (p.durationUnit === 'hours') {
+                const h = Math.floor(totalMin / 60);
+                const m = totalMin % 60;
+                if (m === 0) {
+                  durationStr = `${h}h`;
+                } else {
+                  durationStr = `${h}h${m}min`; // ex: "1h20min"
+                }
+              } else if (p.durationUnit === 'days') {
+                const nbDays = totalMin / (24 * 60);
+                if (Number.isInteger(nbDays)) {
+                  durationStr = nbDays === 1 ? '1 jour' : `${nbDays} jours`;
+                } else {
+                  durationStr = `${nbDays} jours`;
+                }
+              }
+
+              // Construire la description
+              if (p.durationUnit === 'days') {
+                // "2 jours de développement"
+                // => pas de quantité
+                if (durationStr) {
+                  return `${durationStr} de ${p.description}`;
+                } else {
+                  return `${p.description}`;
+                }
+              } else {
+                // minutes / hours : "2 massages de 80min" ou "2 massages de 1h20min"
+                let description = `${quantity} ${baseWord}`;
+                if (durationStr) {
+                  description += ` de ${durationStr}`;
+                }
+                return description;
+              }
+            }
+          })
           .join(' / ');
+
 
         const prestationsWidth = 280;
         const prestationsHeight = doc.heightOfString(prestationsText, {

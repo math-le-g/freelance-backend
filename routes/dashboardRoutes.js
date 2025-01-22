@@ -4,8 +4,6 @@ const router = express.Router();
 const Facture = require('../models/Facture');
 
 
-
-
 // =======================
 // /api/dashboard/totals
 // =======================

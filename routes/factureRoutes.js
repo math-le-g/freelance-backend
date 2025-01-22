@@ -801,7 +801,7 @@ router.put('/:id/rectify', [
     // Sauvegarder la facture avec le nouveau pdfPath
     await facture.save({ session });
 
-    // Mise à jour des prestations ////////////////////////////////////////////////////////////////////////////////////
+    // Mise à jour des prestations 
     await Prestation.updateMany(
       { _id: { $in: updatedPrestationsIds } },
       {
@@ -812,7 +812,7 @@ router.put('/:id/rectify', [
       },
       { session }
     );
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 
 
     // Commit de la transaction
