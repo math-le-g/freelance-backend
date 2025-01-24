@@ -13,7 +13,7 @@ const generateToken = (user) => {
       lastName: user.lastName,
     },
     process.env.JWT_SECRET,
-    { expiresIn: '1h' } // Le token expire dans 1 heure
+    { expiresIn: '12h' } // Le token expire dans 12 heure
   );
 };
 

@@ -1,3 +1,5 @@
+// backend/models/Prestation.js
+
 const mongoose = require('mongoose');
 
 const prestationSchema = new mongoose.Schema({
@@ -24,15 +26,15 @@ const prestationSchema = new mongoose.Schema({
   // Pour facturation horaire
   hours: {
     type: Number,
-    required: function () { return this.billingType === 'hourly' },
+    required: function () { return this.billingType === 'hourly'; },
     default: 0
   },
   hourlyRate: {
     type: Number,
-    required: function () { return this.billingType === 'hourly' },
+    required: function () { return this.billingType === 'hourly'; },
     default: 0
   },
-  // Pour facturation forfaitaire
+  // Pour facturation forfaitaire et journalière
   fixedPrice: {
     type: Number,
     required: function() { return this.billingType === 'fixed' || this.billingType === 'daily'; },
@@ -45,15 +47,14 @@ const prestationSchema = new mongoose.Schema({
   },
   duration: {
     type: Number,
+    required: function () { return this.billingType !== 'fixed'; }, // requis pour 'hourly' et 'daily'
     default: 0
   },
-  durationValue: {
-    type: Number,
-    default: '',
-  },
+  // Supprimé durationValue car incohérent et inutilisé
   durationUnit: {
     type: String,
     enum: ['minutes', 'hours', 'days'],
+    required: true,
     default: 'minutes'
   },
   total: {
@@ -81,27 +82,41 @@ const prestationSchema = new mongoose.Schema({
   toObject: { virtuals: true }
 });
 
+// Hook pre-save pour calculer le total
 prestationSchema.pre('save', function (next) {
   if (this.billingType === 'hourly') {
     this.total = this.hours * this.hourlyRate;
   } else if (this.billingType === 'fixed') {
-    // Forfait : quantity × prix unitaire
     this.total = this.fixedPrice * (this.quantity || 1);
   } else if (this.billingType === 'daily') {
-    // "Journalier" => this.duration = total minutes => nb de jours = duration / (24*60)
-    const nbDays = this.duration / (24 * 60); // ex: 3 jours => 3 * 24 * 60 = 4320
-    // total = prix × nbDays
+    // Pour 'daily', duration représente le nombre de jours en minutes
+    const nbDays = this.duration / 1440; // 1 jour = 1440 minutes
     this.total = nbDays * this.fixedPrice;
   }
   next();
 });
 
+// Virtual 'hoursEquivalent' pour afficher la durée de manière cohérente
 prestationSchema.virtual('hoursEquivalent').get(function () {
   if (this.billingType === 'hourly') {
     return this.hours || 0;
+  } else if (this.billingType === 'daily') {
+    return this.duration / 1440 || 0; // Nombre de jours
   }
-  return this.duration ? this.duration / 60 : 0;
+  return this.duration / 60 || 0; // Pour 'minutes'
+});
+
+// Validation personnalisée pour assurer la cohérence entre billingType et durationUnit
+prestationSchema.pre('save', function (next) {
+  if (this.billingType === 'hourly') {
+    this.duration = this.hours * 60; // Convertir les heures en minutes
+    this.total = this.hours * this.hourlyRate;
+  } else if (this.billingType === 'fixed') {
+    this.total = this.fixedPrice * (this.quantity || 1);
+  } else if (this.billingType === 'daily') {
+    this.total = (this.duration / 1440) * this.fixedPrice;
+  }
+  next();
 });
 
 module.exports = mongoose.model('Prestation', prestationSchema);
-
