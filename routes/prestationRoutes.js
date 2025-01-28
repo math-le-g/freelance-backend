@@ -5,7 +5,7 @@ const Client = require('../models/Client');
 const Facture = require('../models/Facture');
 const { body, validationResult } = require('express-validator');
 
-/**
+/*
  * Middleware de validation pour les prestations
  */
 const validatePrestation = [

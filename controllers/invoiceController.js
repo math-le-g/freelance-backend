@@ -4,11 +4,6 @@ const { fr } = require('date-fns/locale');
 const fs = require('fs');
 const path = require('path');
 
-/**
- * Formate les heures en format "XhYY".
- * @param {number} hoursDecimal - Les heures en décimal.
- * @returns {string} - Les heures formatées.
- */
 function formatHours(hoursDecimal) {
   let hours = Math.floor(hoursDecimal);
   let minutesDecimal = (hoursDecimal - hours) * 60;
@@ -20,7 +15,6 @@ function formatHours(hoursDecimal) {
   }
 
   const minutesFormatted = minutes.toString().padStart(2, '0');
-
   if (minutes > 0) {
     return `${hours}h${minutesFormatted}`;
   } else {
@@ -28,33 +22,17 @@ function formatHours(hoursDecimal) {
   }
 }
 
-/**
- * Sanitize le nom du client pour l'utilisation dans le nom du fichier PDF.
- * @param {string} name - Le nom du client.
- * @returns {string} - Le nom sanitizé.
- */
 function sanitizeClientName(name) {
-  return name
-    .replace(/[^a-zA-Z0-9-_]/g, '_')
-    .replace(/\s+/g, '_');
+  return name.replace(/[^a-zA-Z0-9-_]/g, '_').replace(/\s+/g, '_');
 }
 
-/**
- * Dessine l'en-tête du tableau (colonnes) à la position y spécifiée,
- * en mettant en gras les intitulés.
- * @param {PDFDocument} doc - L'instance PDFKit.
- * @param {number} x - Position X de départ.
- * @param {number} y - Position Y de départ.
- */
 function drawTableHeader(doc, x, y) {
   const headerHeight = 25;
   doc.fillColor('#f3f3f3');
   doc.rect(x, y, 500, headerHeight).fill();
   doc.fillColor('#000000');
 
-  // On rend le texte en gras
   doc.font('Helvetica-Bold').fontSize(12);
-
   doc.text('Date', x + 10, y + 7);
   doc.text('Prestations', x + 120, y + 7);
   doc.text('Tarifs (€)', x + 445, y + 7);
@@ -62,14 +40,6 @@ function drawTableHeader(doc, x, y) {
   return headerHeight;
 }
 
-/**
- * Génère le PDF d'une facture et retourne le chemin du PDF généré (ou un buffer).
- * @param {Object} facture - L'objet facture.
- * @param {Object} client - L'objet client.
- * @param {Object} businessInfo - Les informations de l'entreprise.
- * @param {Array} prestations - Liste des prestations.
- * @returns {Promise<Buffer|string>} - Le chemin du PDF ou le buffer du PDF.
- */
 const generateInvoicePDF = async (facture, client, businessInfo, prestations) => {
   return new Promise((resolve, reject) => {
     try {
@@ -93,26 +63,26 @@ const generateInvoicePDF = async (facture, client, businessInfo, prestations) =>
           annotating: false,
           fillingForms: false,
           contentAccessibility: true,
-          documentAssembly: false
-        }
+          documentAssembly: false,
+        },
       });
 
       const buffers = [];
       doc.on('data', buffers.push.bind(buffers));
       doc.on('end', () => {
         const pdfData = Buffer.concat(buffers);
-        resolve(pdfData); 
+        resolve(pdfData);
       });
 
-      // --- Variables de mise en page ---
-      const pageHeight = doc.page.height;   // Hauteur de la page
-      const marginTop = 50;                // Marge haute
-      const bottomMargin = 50;             // Marge basse
-      const marginLeft = 50;               // Marge gauche
-      let y = marginTop;                   // Position Y courante
+      // --- Mise en page ---
+      const pageHeight = doc.page.height;
+      const marginTop = 50;
+      const bottomMargin = 50;
+      const marginLeft = 50;
+      let y = marginTop;
       const maxY = pageHeight - bottomMargin;
 
-      // --- Infos de l'entreprise ---
+      // --- Info entreprise ---
       doc.font('Helvetica-Bold').fontSize(12);
       doc.text(businessInfo.name, marginLeft, y);
       doc.font('Helvetica').fontSize(12);
@@ -123,14 +93,17 @@ const generateInvoicePDF = async (facture, client, businessInfo, prestations) =>
       doc.text(`Siret: ${businessInfo.siret}`, marginLeft, y + 100);
       doc.text(businessInfo.companyType, marginLeft, y + 120);
 
-      // --- Infos du client ---
+      // --- Info client ---
       y += 140;
       const clientInfoX = 380;
       const clientInfoWidth = 180;
       const verticalSpacing = 10;
 
       doc.font('Helvetica-Bold').fontSize(12);
-      const nameHeight = doc.heightOfString(client.name, { width: clientInfoWidth, align: 'left' });
+      const nameHeight = doc.heightOfString(client.name, {
+        width: clientInfoWidth,
+        align: 'left',
+      });
       doc.text(client.name, clientInfoX, y, { width: clientInfoWidth, align: 'left' });
 
       y += nameHeight + verticalSpacing;
@@ -153,13 +126,15 @@ const generateInvoicePDF = async (facture, client, businessInfo, prestations) =>
       doc.font('Helvetica-Bold').fontSize(12);
       doc.text(`Facture N°${facture.invoiceNumber}`, marginLeft, y + 15);
 
-      // --- Titre principal (centré) ---
+      // --- Titre principal ---
       y += 30;
       doc.font('Helvetica-Bold').fontSize(14);
       doc.text(
-        `FACTURE DU MOIS DE ${format(new Date(facture.year, facture.month - 1), 'MMMM yyyy', {
-          locale: fr
-        }).toUpperCase()}`,
+        `FACTURE DU MOIS DE ${format(
+          new Date(facture.year, facture.month - 1),
+          'MMMM yyyy',
+          { locale: fr }
+        ).toUpperCase()}`,
         { align: 'center', width: 500 }
       );
 
@@ -170,32 +145,32 @@ const generateInvoicePDF = async (facture, client, businessInfo, prestations) =>
       doc.font('Helvetica').fontSize(12);
       doc.text(businessInfo.invoiceTitle, labelX + 50, y, { width: 350, align: 'left' });
 
-      // --- Préparation du tableau ---
+      // --- Tableau ---
       y += 30;
-      // On dessine l'en-tête du tableau et on avance y
       let headerHeight = drawTableHeader(doc, marginLeft, y);
       y += headerHeight;
 
-      // Police standard pour le contenu du tableau
       doc.font('Helvetica').fontSize(12);
 
-      // Pour l'alternance des lignes
       let isGrey = false;
 
-      // Regrouper les prestations par date
+      // **Paramètres de ligne**:
+      const rowPaddingVertical = 10; // padding haut/bas dans la ligne
+      const minimalRowHeight = 40;   // hauteur minimale
+
+      // Prestations groupées par date
       const prestationsByDate = {};
-      prestations.forEach((prestation) => {
-        const dateKey = format(new Date(prestation.date), 'dd/MM/yyyy');
+      prestations.forEach((p) => {
+        const dateKey = format(new Date(p.date), 'dd/MM/yyyy');
         if (!prestationsByDate[dateKey]) {
           prestationsByDate[dateKey] = [];
         }
-        prestationsByDate[dateKey].push(prestation);
+        prestationsByDate[dateKey].push(p);
       });
 
-      // Tri des dates (du plus récent au plus ancien)
+      // Tri (du plus récent au plus ancien)
       const dateKeys = Object.keys(prestationsByDate);
       const sortedDateKeys = dateKeys.sort((b, a) => {
-        // Convertir "dd/MM/yyyy" en "yyyy-MM-dd"
         const parseDate = (dateStr) => {
           const [dd, MM, yyyy] = dateStr.split('/');
           return new Date(`${yyyy}-${MM}-${dd}`);
@@ -203,23 +178,20 @@ const generateInvoicePDF = async (facture, client, businessInfo, prestations) =>
         return parseDate(b) - parseDate(a);
       });
 
-      // --- Boucle sur chaque date ---
       sortedDateKeys.forEach((date) => {
         const datePrestations = prestationsByDate[date];
 
-        // Construire la description jointe
+        // Construit le texte
+        const prestationsWidth = 280;
         const prestationsText = datePrestations
           .map((p) => {
             if (p.billingType === 'hourly') {
-              // Ex: "2h30 de Massage"
               const duration = formatHours(p.hours);
               return `${duration} de ${p.description}`;
             } else {
-              // Forfait ou daily
               const quantity = p.quantity ?? 1;
               const pluralSuffix = quantity > 1 ? 's' : '';
               const baseWord = p.description + pluralSuffix;
-
               let durationStr = '';
               const totalMin = p.duration || 0;
 
@@ -228,29 +200,22 @@ const generateInvoicePDF = async (facture, client, businessInfo, prestations) =>
               } else if (p.durationUnit === 'hours') {
                 const h = Math.floor(totalMin / 60);
                 const m = totalMin % 60;
-                if (m === 0) {
-                  durationStr = `${h}h`;
-                } else {
-                  durationStr = `${h}h${m}min`;
-                }
+                durationStr = m === 0 ? `${h}h` : `${h}h${m}min`;
               } else if (p.durationUnit === 'days') {
                 const nbDays = totalMin / (24 * 60);
-                if (Number.isInteger(nbDays)) {
-                  durationStr = nbDays === 1 ? '1 jour' : `${nbDays} jours`;
-                } else {
-                  durationStr = `${nbDays} jours`;
-                }
+                durationStr =
+                  Number.isInteger(nbDays) && nbDays === 1
+                    ? '1 jour'
+                    : `${nbDays} jours`;
               }
 
               if (p.durationUnit === 'days') {
-                // ex: "2 jours de développement"
                 if (durationStr) {
                   return `${durationStr} de ${p.description}`;
                 } else {
                   return p.description;
                 }
               } else {
-                // minutes / hours => "2 massages de 80min" etc.
                 let description = `${quantity} ${baseWord}`;
                 if (durationStr) {
                   description += ` de ${durationStr}`;
@@ -261,67 +226,73 @@ const generateInvoicePDF = async (facture, client, businessInfo, prestations) =>
           })
           .join(' / ');
 
-        // Calcul de la hauteur nécessaire
-        const prestationsWidth = 280;
+        // Calcule la hauteur du bloc de texte
         const prestationsHeight = doc.heightOfString(prestationsText, {
           width: prestationsWidth,
           align: 'left',
+          lineGap: 2,
         });
-        // On prévoit au moins 30px, ou la hauteur du texte + 10
-        const rowHeight = Math.max(30, prestationsHeight + 10);
 
-        // --- Vérifier si on dépasse la limite de la page ---
+        // Hauteur finale de la ligne : min(40) ou la hauteur + padding
+        const rowHeight = Math.max(
+          minimalRowHeight,
+          prestationsHeight + rowPaddingVertical * 2
+        );
+
+        // Saut de page si besoin
         if (y + rowHeight > maxY) {
-          // On ajoute une page
           doc.addPage();
-          // Réinitialiser y
           y = marginTop;
-          // Redessiner l'en-tête du tableau
           headerHeight = drawTableHeader(doc, marginLeft, y);
           doc.font('Helvetica').fontSize(12);
           y += headerHeight;
         }
 
-        // Alternance de fond (gris/blanc)
-        if (isGrey) {
-          doc.fillColor('#f9f9f9');
-          doc.rect(marginLeft, y, 500, rowHeight).fill();
-          doc.fillColor('#000000');
-        }
+        // Fond de ligne
+        const backgroundColor = isGrey ? '#f9f9f9' : '#ffffff';
+        doc.fillColor(backgroundColor)
+          .rect(marginLeft, y, 500, rowHeight)
+          .fill();
 
-        // Affichage du texte
-        doc.text(date, marginLeft + 10, y + 10, { width: 100 });
-        doc.text(prestationsText, marginLeft + 120, y + 10, {
+        doc.fillColor('#000000'); // repasser le texte en noir
+
+        // Dessin du texte
+        // On ajoute rowPaddingVertical comme marge en haut
+        const textY = y + rowPaddingVertical;
+
+        doc.text(date, marginLeft + 10, textY, { width: 100 });
+        doc.text(prestationsText, marginLeft + 120, textY, {
           width: prestationsWidth,
           align: 'left',
           lineGap: 2,
         });
 
         const totalForDate = datePrestations.reduce((sum, p) => sum + p.total, 0);
-        doc.text(`${totalForDate.toFixed(2)} €`, marginLeft + 400, y + 10, {
+        doc.text(`${totalForDate.toFixed(2)} €`, marginLeft + 400, textY, {
           align: 'right',
         });
 
-        // On avance le curseur y
+        // Avance y
         y += rowHeight;
+        // On peut ajouter un petit espace supplémentaire (optionnel)
+        // y += 5;
+
         isGrey = !isGrey;
       });
 
-      // --- Ajouter un écart vertical avant le total ---
-      y += 30; // ← Espace supplémentaire
-
-      // --- Total général ---
+      // Espace avant total
+      y += 30;
       if (y + 25 > maxY) {
         doc.addPage();
         y = marginTop;
       }
 
+      // Total global
       const total = prestations.reduce((sum, p) => sum + p.total, 0);
       doc.fillColor('#f3f3f3');
       doc.rect(marginLeft, y, 500, 25).fill();
       doc.fillColor('#000000');
 
-      // Titre en gras
       doc.font('Helvetica-Bold');
       doc.text('TOTAL :', marginLeft + 120, y + 7, { width: 280, align: 'left' });
       doc.text(`${total.toFixed(2)} €`, marginLeft + 400, y + 7, { align: 'right' });
@@ -329,7 +300,7 @@ const generateInvoicePDF = async (facture, client, businessInfo, prestations) =>
       y += 40;
       doc.font('Helvetica').fontSize(12);
 
-      // --- Mentions finales ---
+      // Mentions finales
       if (businessInfo.displayOptions && businessInfo.displayOptions.showTvaComment) {
         if (y + 20 > maxY) {
           doc.addPage();
@@ -344,10 +315,14 @@ const generateInvoicePDF = async (facture, client, businessInfo, prestations) =>
           doc.addPage();
           y = marginTop;
         }
-        doc.text(`Date d'échéance : ${format(new Date(facture.dateEcheance), 'dd/MM/yyyy')}`, marginLeft, y);
+        doc.text(
+          `Date d'échéance : ${format(new Date(facture.dateEcheance), 'dd/MM/yyyy')}`,
+          marginLeft,
+          y
+        );
       }
 
-      // --- Sauvegarde du PDF ---
+      // Écriture du fichier
       const pdfDir = path.join(__dirname, '../public/uploads/invoices');
       if (!fs.existsSync(pdfDir)) {
         fs.mkdirSync(pdfDir, { recursive: true });
@@ -368,7 +343,6 @@ const generateInvoicePDF = async (facture, client, businessInfo, prestations) =>
 
       writeStream.on('finish', () => resolve(pdfPath));
       writeStream.on('error', reject);
-
     } catch (error) {
       reject(error);
     }
@@ -379,4 +353,6 @@ module.exports = {
   generateInvoicePDF,
   sanitizeClientName,
 };
+
+
 
