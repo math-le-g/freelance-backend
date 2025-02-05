@@ -18,6 +18,14 @@ const BusinessInfoSchema = new mongoose.Schema({
     type: String,
     default: '', // Valeur par défaut
   },
+  taxeURSSAF: {
+    type: Number,
+    default: 0.246,
+  },
+  tauxTVA: {
+    type: Number,
+    default: 0.20, // 20%
+  },
   invoiceNumberStart: {
     type: Number,
     default: 1, // Numéro de départ par défaut

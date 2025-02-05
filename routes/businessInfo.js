@@ -25,6 +25,8 @@ const validateBusinessInfoOptional = [
   body('features.automaticReminders.thirdReminder').optional().isInt({ min: 1 }),
   body('displayOptions.showDueDateOnInvoice').optional().isBoolean(),
   body('displayOptions.showDueDateInHistory').optional().isBoolean(),
+  body('taxeURSSAF').optional().isNumeric().withMessage('La taxe URSSAF doit être un nombre.'),
+
 ];
 
 // GET /api/business-info - Récupérer les informations de l'entreprise
@@ -64,6 +66,7 @@ router.post('/', validateBusinessInfoOptional, async (req, res) => {
     // Préparer les données de mise à jour en utilisant les données reçues ou en gardant l’existant
     const updatedData = {
       ...req.body,
+      taxeURSSAF: req.body.taxeURSSAF !== undefined ? req.body.taxeURSSAF : (businessInfo?.taxeURSSAF || 0.232),
       features: {
         invoiceStatus: {
           enabled: req.body.features?.invoiceStatus?.enabled ?? (businessInfo?.features?.invoiceStatus?.enabled || false),

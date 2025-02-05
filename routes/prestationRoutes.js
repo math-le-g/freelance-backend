@@ -145,8 +145,10 @@ router.put('/:id', validatePrestation, async (req, res) => {
       hourlyRate,
       fixedPrice,
       duration,
+      durationUnit,
       clientId,
-      date
+      date,
+      quantity,
     } = req.body;
 
     // 1) Vérifier si la prestation existe
@@ -179,6 +181,7 @@ router.put('/:id', validatePrestation, async (req, res) => {
     existingPrestation.client = clientId;
     existingPrestation.date = date || new Date();
     existingPrestation.duration = duration || 0;
+    existingPrestation.durationUnit = durationUnit || existingPrestation.durationUnit;
 
     // 5) Gérer les champs selon le type
     if (billingType === 'hourly') {
@@ -200,6 +203,7 @@ router.put('/:id', validatePrestation, async (req, res) => {
       existingPrestation.fixedPrice = fixedPrice;
       existingPrestation.hours = undefined;
       existingPrestation.hourlyRate = undefined;
+      existingPrestation.quantity = quantity ? parseInt(quantity, 10) : existingPrestation.quantity;
       // quantity => si vous la gérez, vous pouvez la laisser
     }
 

@@ -1,3 +1,4 @@
+
 const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
@@ -11,6 +12,7 @@ const Client = require('../models/Client');
 const BusinessInfo = require('../models/BusinessInfo');
 const { generateInvoicePDF, sanitizeClientName } = require('../controllers/invoiceController'); // Import centralisé
 
+
 const { body, validationResult } = require('express-validator');
 
 
@@ -19,131 +21,85 @@ const { body, validationResult } = require('express-validator');
  * Route POST pour la prévisualisation d'une facture
  * URL: /api/factures/preview
  */
+
 router.post('/preview', [
   body('clientId').isMongoId().withMessage('clientId invalide.'),
   body('year').isInt({ min: 1900 }).withMessage('Année invalide.'),
   body('month').isInt({ min: 1, max: 12 }).withMessage('Mois invalide.')
 ], async (req, res) => {
-  // Valider les données
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({ message: 'Validation échouée.', errors: errors.array() });
-  }
-
   try {
     const userId = req.user._id;
     const { clientId, year, month } = req.body;
-
-    console.log('Données reçues pour prévisualisation:', { clientId, year, month });
-
-    // Conversion et validation des données
-    const parsedYear = parseInt(year, 10);
-    const parsedMonth = parseInt(month, 10);
-
-    // Vérification du client
-    const client = await Client.findOne({ _id: clientId, user: userId });
-    if (!client) {
-      return res.status(404).json({ message: 'Client non trouvé ou non autorisé.' });
-    }
-
-    // Création de `dateFacture`
     const dateFacture = new Date();
 
-    // Création des dates de début et fin du mois
-    const startDate = startOfMonth(dateFacture);
-    const endDate = endOfMonth(dateFacture);
+    const client = await Client.findOne({ _id: clientId, user: userId });
+    if (!client) return res.status(404).json({ message: 'Client non trouvé.' });
 
-    // Récupération des prestations
+    // Dates de début et fin du mois
+    const startDate = new Date(year, month - 1, 1);
+    const endDate = new Date(year, month, 0);
+
     const prestations = await Prestation.find({
       user: userId,
       client: clientId,
-      date: {
-        $gte: startDate,
-        $lte: endDate
-      }
+      date: { $gte: startDate, $lte: endDate }
     });
 
-    if (prestations.length === 0) {
-      return res.status(404).json({ message: 'Aucune prestation trouvée pour ce client et ce mois.' });
+    if (!prestations.length) {
+      return res.status(404).json({ message: 'Aucune prestation trouvée.' });
     }
 
-    // Calculs financiers
-    const montantHT = prestations.reduce((acc, p) => acc + p.total, 0);
-    const taxeURSSAF = parseFloat((montantHT * 0.232).toFixed(2));
-    const montantNet = parseFloat((montantHT - taxeURSSAF).toFixed(2));
-    const montantTVA = 0; // Ajuster si nécessaire
-    const montantTTC = parseFloat((montantNet + montantTVA).toFixed(2)); // TVA=0, ajuster si nécessaire
-    const nombreHeures = prestations.reduce((acc, p) => acc + p.hours, 0);
-
-    // Récupérer les informations de l'entreprise
     const businessInfo = await BusinessInfo.findOne({ user: userId });
-    if (!businessInfo) {
-      return res.status(404).json({ message: 'Paramètres de facturation non trouvés.' });
-    }
+    const montantHT = prestations.reduce((sum, p) => sum + p.total, 0);
+    const taxRate = businessInfo.taxeURSSAF || 0.246;
+    const taxeURSSAF = parseFloat((montantHT * taxRate).toFixed(2));
+    const montantNet = parseFloat((montantHT - taxeURSSAF).toFixed(2));
 
-    // Détermination du numéro de facture pour prévisualisation
-    const lastInvoice = await Facture.findOne({ user: userId }).sort({ invoiceNumber: -1 });
-    let nextInvoiceNumber = businessInfo.invoiceNumberStart || 1;
+    // Calcul TVA et TTC
+    const tauxTVA = businessInfo.tauxTVA || 0.20;
+    const montantTVA = parseFloat((montantHT * tauxTVA).toFixed(2));
+    const montantTTC = parseFloat((montantHT + montantTVA).toFixed(2));
 
-    if (lastInvoice) {
-      nextInvoiceNumber = Math.max(
-        businessInfo.invoiceNumberStart,
-        lastInvoice.invoiceNumber + 1
-      );
-    }
-
-    // Calcul de la date d'échéance basée sur dateFacture et paymentDelay
-    const paymentDelay = businessInfo.features?.invoiceStatus?.paymentDelay || 30;
+    const nextInvoiceNumber = await getNextInvoiceNumber(userId);
     const dateEcheance = new Date(dateFacture);
-    dateEcheance.setDate(dateEcheance.getDate() + paymentDelay);
+    dateEcheance.setDate(dateEcheance.getDate() + 30);
 
-    // Facture temporaire pour prévisualisation
     const factureTemp = {
-      user: userId,
-      client: clientId,
-      prestations: prestations.map(p => p._id),
+      dateFacture,
+      dateEcheance,
+      prestations,
       montantHT,
       taxeURSSAF,
       montantNet,
-      montantTVA,
-      montantTTC,
-      nombreHeures,
+      montantTVA,   // ajouté
+      montantTTC,   // ajouté
       invoiceNumber: nextInvoiceNumber,
-      year: parsedYear,
-      month: parsedMonth,
-      dateFacture,
-      dateEcheance,
-      status: 'unpaid'
+      year: parseInt(year),
+      month: parseInt(month),
     };
 
-    // Générer le PDF
     const pdfBuffer = await generateInvoicePDF(factureTemp, client, businessInfo, prestations);
 
-    // Sauvegarder le PDF dans le dossier uploads/invoices
-    const pdfDir = path.join(__dirname, '../public/uploads/invoices');
-    if (!fs.existsSync(pdfDir)) {
-      fs.mkdirSync(pdfDir, { recursive: true });
-    }
-
-    const sanitizedClientName = sanitizeClientName(client.name);
-    const fileName = `Facture_${sanitizedClientName}_${format(new Date(factureTemp.dateFacture), 'MM_yyyy')}_${factureTemp.invoiceNumber}_${Date.now()}.pdf`;
-    const filePath = path.join(pdfDir, fileName);
-    const pdfPath = `uploads/invoices/${fileName}`;
-
-    fs.writeFileSync(filePath, pdfBuffer);
-
-    // Envoyer le PDF en réponse
     res.set({
       'Content-Type': 'application/pdf',
-      'Content-Disposition': 'inline; filename=preview_facture.pdf',
+      'Content-Length': pdfBuffer.length,
+      'Content-Disposition': 'inline; filename=preview.pdf'
     });
-    res.sendFile(filePath);
+    res.send(pdfBuffer);
 
   } catch (error) {
-    console.error('Erreur lors de la prévisualisation:', error);
-    res.status(500).json({ message: 'Erreur lors de la prévisualisation' });
+    console.error('Erreur prévisualisation:', error);
+    res.status(500).json({ message: error.message });
   }
 });
+
+// Fonction utilitaire pour obtenir le prochain numéro de facture
+async function getNextInvoiceNumber(userId) {
+  const lastInvoice = await Facture.findOne({ user: userId })
+    .sort({ invoiceNumber: -1 });
+  return (lastInvoice?.invoiceNumber || 0) + 1;
+}
+
 
 /**
  * Route POST pour créer une facture
@@ -222,13 +178,6 @@ router.post('/', [
       });
     }
 
-    // Calculs financiers
-    const montantHT = prestations.reduce((acc, p) => acc + p.total, 0);
-    const taxeURSSAF = parseFloat((montantHT * 0.232).toFixed(2));
-    const montantNet = parseFloat((montantHT - taxeURSSAF).toFixed(2));
-    const montantTVA = 0; // Ajuster si nécessaire
-    const montantTTC = parseFloat((montantNet + montantTVA).toFixed(2)); // TVA=0, ajuster si nécessaire
-    const nombreHeures = prestations.reduce((acc, p) => acc + p.hours, 0);
 
     // Récupérer les informations de l'entreprise
     const businessInfo = await BusinessInfo.findOne({ user: userId }).session(session);
@@ -239,6 +188,19 @@ router.post('/', [
         message: 'Paramètres de facturation non trouvés.'
       });
     }
+
+
+    // Calculs financiers
+    const montantHT = prestations.reduce((acc, p) => acc + p.total, 0);
+    const taxRate = businessInfo.taxeURSSAF || 0.246;
+    const taxeURSSAF = parseFloat((montantHT * taxRate).toFixed(2));
+    const montantNet = parseFloat((montantHT - taxeURSSAF).toFixed(2));
+    const tauxTVA = businessInfo.tauxTVA || 0.20;
+    const montantTVA = parseFloat((montantHT * tauxTVA).toFixed(2));
+    const montantTTC = parseFloat((montantHT + montantTVA).toFixed(2));
+    const nombreHeures = prestations.reduce((acc, p) => acc + p.hours, 0);
+
+
 
     // Détermination du numéro de facture
     const lastInvoice = await Facture.findOne({ user: userId }).sort({ invoiceNumber: -1 }).session(session);
@@ -297,8 +259,6 @@ router.post('/', [
     // Sauvegarder la facture
     await facture.save({ session });
 
-
-    ///////////////////////////////////////////////////////////////////////////////////////////////
     // Mise à jour des prestations pour les lier à la facture
     await Prestation.updateMany(
       { _id: { $in: prestations.map(p => p._id) } },
@@ -310,7 +270,6 @@ router.post('/', [
       },
       { session }
     );
-    //////////////////////////////////////////////////////////////////////////////////////////////////
 
 
     // Mise à jour du numéro de facture dans BusinessInfo
@@ -436,11 +395,11 @@ router.delete('/:id', async (req, res) => {
     // Réinitialiser les prestations associées
     await Prestation.updateMany(
       { invoiceId: factureId },
-      { 
-        $set: { 
+      {
+        $set: {
           invoiceId: null,
-          invoicePaid: false 
-        } 
+          invoicePaid: false
+        }
       },
       { session }
     );
@@ -469,39 +428,45 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
+
+
 /**
  * Route GET pour télécharger ou visualiser le PDF d'une facture
  * URL: /api/factures/:id/pdf
  */
+
 router.get('/:id/pdf', async (req, res) => {
   try {
     const userId = req.user._id;
     const factureId = req.params.id;
 
-    // Vérifier si l'ID est valide
-    if (!mongoose.Types.ObjectId.isValid(factureId)) {
-      return res.status(400).json({ message: 'ID de facture invalide.' });
+    const facture = await Facture.findOne({ _id: factureId, user: userId })
+      .populate('client')
+      .populate('prestations');
+
+    if (!facture) {
+      return res.status(404).json({ message: 'Facture non trouvée.' });
     }
 
-    const facture = await Facture.findOne({ _id: factureId, user: userId });
+    const client = await Client.findById(facture.client);
+    const businessInfo = await BusinessInfo.findOne({ user: userId });
 
-    if (!facture || !facture.pdfPath) {
-      return res.status(404).json({ message: 'PDF de la facture non trouvé.' });
-    }
+    const pdfBuffer = await generateInvoicePDF(facture, client, businessInfo, facture.prestations);
 
-    const pdfFullPath = path.join(__dirname, '../public', facture.pdfPath);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Length': pdfBuffer.length,
+      'Content-Disposition': 'inline; filename=facture.pdf'
+    });
+    res.send(pdfBuffer);
 
-    // Vérifier si le fichier existe
-    if (!fs.existsSync(pdfFullPath)) {
-      return res.status(404).json({ message: 'Fichier PDF non trouvé.' });
-    }
-
-    res.sendFile(pdfFullPath);
   } catch (error) {
-    console.error('Erreur GET /factures/:id/pdf:', error);
-    res.status(500).json({ message: 'Erreur serveur lors de la récupération du PDF' });
+    console.error('Erreur PDF:', error);
+    res.status(500).json({ message: error.message });
   }
 });
+
+
 
 /**
  * Route POST pour marquer une facture comme payée
@@ -551,7 +516,7 @@ router.post('/:id/paiement', [
       commentaire: commentaire
     });
 
-    // Marquer toutes les prestations associées comme payées/////////////////////////////////////////////////////////
+    // Marquer toutes les prestations associées comme payées
     await Prestation.updateMany(
       {
         invoiceId: factureId,
@@ -566,7 +531,7 @@ router.post('/:id/paiement', [
         }
       }
     );
-    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
     await facture.save();
 
     // Récupérer la facture avec les prestations mises à jour
@@ -587,85 +552,24 @@ router.post('/:id/paiement', [
     });
   }
 });
-
-
-/**
- * Route PUT pour rectifier une facture
- * URL: /api/factures/:id/rectify
- */
-router.put('/:id/rectify', [
-  body('clientId').optional().isMongoId().withMessage('clientId invalide.'),
-  body('dateFacture').optional().isISO8601().toDate().withMessage('dateFacture invalide.'),
-  body('prestations').isArray().withMessage('prestations doit être un tableau.'),
-  body('prestations.*.description').isString().withMessage('description est requise.'),
-  body('prestations.*.hours').isFloat({ min: 0 }).withMessage('hours doit être un nombre positif.'),
-  body('prestations.*.hourlyRate').isFloat({ min: 0 }).withMessage('hourlyRate doit être un nombre positif.'),
-  body('prestations.*.date').optional().isISO8601().toDate().withMessage('date invalide.'),
-  body('prestations.*._id').optional().isMongoId(),
-  body('prestations.*._deleted').optional().isBoolean(),
-  body('changesComment').optional().isString()
-], async (req, res) => {
-  // Valider les données
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({ message: 'Validation échouée.', errors: errors.array() });
-  }
-
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+router.post('/:id/rectify', async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
+    const { id } = req.params;
+    const { modifiedInvoice, reason } = req.body;
     const userId = req.user._id;
-    const factureId = req.params.id;
-    const {
-      clientId,
-      dateFacture,
-      prestations = [],
-      changesComment,
-    } = req.body;
 
-    // Vérifier si l'ID est valide
-    if (!mongoose.Types.ObjectId.isValid(factureId)) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({ message: 'ID de facture invalide.' });
-    }
+    const facture = await Facture.findOne({ _id: id, user: userId }).session(session);
+    if (!facture) throw new Error('Facture non trouvée');
+    if (facture.status === 'paid') throw new Error('Impossible de rectifier une facture payée');
 
-    // Récupérer la facture
-    const facture = await Facture.findOne({ _id: factureId, user: userId })
-      .populate('client')
-      .populate('prestations')
-      .session(session);
-
-    if (!facture) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(404).json({ message: 'Facture introuvable ou non autorisée.' });
-    }
-
-    if (facture.status !== 'unpaid') {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        message: 'Impossible de rectifier une facture payée ou en retard.'
-      });
-    }
-
-    // Récupérer les informations de l'entreprise
+    // Récupérer businessInfo AVANT de l'utiliser dans les calculs
     const businessInfo = await BusinessInfo.findOne({ user: userId }).session(session);
-    if (!businessInfo) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(404).json({
-        message: 'Paramètres de facturation non trouvés.'
-      });
-    }
+    if (!businessInfo) throw new Error('Paramètres de facturation non trouvés.');
 
-    // Définir paymentDelay à partir de businessInfo
-    const paymentDelay = businessInfo.features?.invoiceStatus?.paymentDelay || 30;
-
-    // Archiver la version précédente
-    facture.versions = facture.versions || [];
     facture.versions.push({
       date: new Date(),
       client: facture.client,
@@ -675,157 +579,95 @@ router.put('/:id/rectify', [
       montantNet: facture.montantNet,
       montantTTC: facture.montantTTC,
       nombreHeures: facture.nombreHeures,
-      changesComment: changesComment || 'Rectification'
+      changesComment: reason || 'Rectification sans motif'
     });
 
-    // Mettre à jour le client si nécessaire
-    if (clientId && clientId !== facture.client._id.toString()) {
-      const client = await Client.findOne({ _id: clientId, user: userId }).session(session);
-      if (!client) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(404).json({ message: 'Nouveau client non trouvé ou non autorisé.' });
-      }
-      facture.client = clientId;
-    }
+    const updatedPrestations = [];
+    for (const prestation of modifiedInvoice.prestations) {
+      let updatedPrestation;
+      let prestationData = {
+        description: prestation.description,
+        billingType: prestation.billingType,
+        date: prestation.date,
+        duration: prestation.duration,
+        durationUnit: prestation.durationUnit || 'minutes',
+        total: prestation.total,
+        quantity: prestation.quantity || 1
+      };
 
-    // Mettre à jour la dateFacture
-    if (dateFacture) {
-      const nouvelleDate = new Date(dateFacture);
-      if (isNaN(nouvelleDate)) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(400).json({ message: 'Date de facture invalide.' });
-      }
-      facture.dateFacture = nouvelleDate;
-      facture.year = nouvelleDate.getFullYear();
-      facture.month = nouvelleDate.getMonth() + 1;
-    }
-
-    // Gérer la liste de prestations
-    const updatedPrestationsIds = [];
-
-    for (const p of prestations) {
-      if (p._id) {
-        // Cas 1 : Prestations existantes
-        if (p._deleted) {
-          // Supprimer la prestation
-          await Prestation.findByIdAndDelete(p._id).session(session);
-        } else {
-          // Mettre à jour
-          const existingP = await Prestation.findOne({
-            _id: p._id,
-            user: userId
-          }).session(session);
-          if (existingP) {
-            existingP.description = p.description;
-            existingP.hours = p.hours;
-            existingP.hourlyRate = p.hourlyRate;
-            existingP.total = p.hours * p.hourlyRate;
-            existingP.date = p.date ? new Date(p.date) : existingP.date;
-            await existingP.save({ session });
-            updatedPrestationsIds.push(existingP._id);
-          }
-        }
+      if (prestation.billingType === 'hourly') {
+        prestationData.hours = prestation.hours;
+        prestationData.hourlyRate = prestation.hourlyRate;
+        prestationData.durationUnit = 'hours';
       } else {
-        // Cas 2 : Nouvelle prestation
-        const newP = new Prestation({
+        prestationData.fixedPrice = prestation.fixedPrice;
+      }
+
+      if (prestation._id.startsWith('temp-')) {
+        updatedPrestation = await Prestation.create([{
+          ...prestationData,
           user: userId,
           client: facture.client,
-          description: p.description,
-          hours: p.hours,
-          hourlyRate: p.hourlyRate,
-          total: p.hours * p.hourlyRate,
-          date: p.date ? new Date(p.date) : new Date()
-        });
-        await newP.save({ session });
-        updatedPrestationsIds.push(newP._id);
+          invoiceId: facture._id
+        }], { session });
+        updatedPrestation = updatedPrestation[0];
+      } else {
+        updatedPrestation = await Prestation.findByIdAndUpdate(
+          prestation._id,
+          prestationData,
+          { session, new: true }
+        );
       }
+
+      updatedPrestations.push(updatedPrestation);
     }
 
-    // Mettre à jour la liste de prestations de la facture
-    facture.prestations = updatedPrestationsIds;
-
-    // Recalculer les montants
-    const finalPrestations = await Prestation.find({
-      _id: { $in: updatedPrestationsIds }
-    }).session(session);
-
-    const montantHT = finalPrestations.reduce((sum, pr) => sum + pr.total, 0);
-    const taxeURSSAF = parseFloat((montantHT * 0.232).toFixed(2));
+    facture.prestations = updatedPrestations.map(p => p._id);
+    const montantHT = updatedPrestations.reduce((sum, p) => sum + p.total, 0);
+    const taxRate = businessInfo.taxeURSSAF || 0.246;
+    const taxeURSSAF = parseFloat((montantHT * taxRate).toFixed(2));
     const montantNet = parseFloat((montantHT - taxeURSSAF).toFixed(2));
-    const montantTVA = 0; // Ajuster si nécessaire
-    const montantTTC = parseFloat((montantNet + montantTVA).toFixed(2)); // TVA=0, ajuster si nécessaire
-    const nombreHeures = finalPrestations.reduce((sum, pr) => sum + pr.hours, 0);
 
     facture.montantHT = montantHT;
     facture.taxeURSSAF = taxeURSSAF;
     facture.montantNet = montantNet;
-    facture.montantTTC = montantTTC;
-    facture.nombreHeures = nombreHeures;
+    facture.montantTTC = montantNet;
+    facture.nombreHeures = updatedPrestations.reduce((sum, p) => sum + (p.duration || 0) / 60, 0);
 
-    // Recalculer la date d'échéance basée sur la nouvelle dateFacture
-    const dateEcheance = new Date(facture.dateFacture);
-    dateEcheance.setDate(dateEcheance.getDate() + paymentDelay);
-    facture.dateEcheance = dateEcheance;
-
-    // Récupérer le client mis à jour
-    const updatedClient = await Client.findById(facture.client).session(session);
-    if (!updatedClient) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(404).json({
-        message: 'Client non trouvé.'
-      });
-    }
-
-    // Générer le PDF
-    const pdfBuffer = await generateInvoicePDF(facture, updatedClient, businessInfo, finalPrestations);
-
-    // Sauvegarder le PDF dans le dossier uploads/invoices
-    const pdfDir = path.join(__dirname, '../public/uploads/invoices');
-    if (!fs.existsSync(pdfDir)) {
-      fs.mkdirSync(pdfDir, { recursive: true });
-    }
-
-    const sanitizedClientName = sanitizeClientName(updatedClient.name);
-    const fileName = `Facture_${sanitizedClientName}_${format(new Date(facture.dateFacture), 'MM_yyyy')}_${facture.invoiceNumber}_${Date.now()}.pdf`;
-    const filePath = path.join(pdfDir, fileName);
-    const pdfPath = `uploads/invoices/${fileName}`;
-
-    fs.writeFileSync(filePath, pdfBuffer);
-
-    // Définir pdfPath directement
-    facture.pdfPath = pdfPath;
-
-    // Sauvegarder la facture avec le nouveau pdfPath
     await facture.save({ session });
 
-    // Mise à jour des prestations 
-    await Prestation.updateMany(
-      { _id: { $in: updatedPrestationsIds } },
-      {
-        $set: {
-          invoiceId: facture._id,
-          invoicePaid: facture.status === 'paid'
-        }
-      },
-      { session }
-    );
+    const client = await Client.findById(facture.client);
+    // businessInfo a déjà été défini ci-dessus, on l'utilise pour générer le PDF
+    const pdfBuffer = await generateInvoicePDF(facture, client, businessInfo, updatedPrestations);
 
-
-
-    // Commit de la transaction
     await session.commitTransaction();
-    session.endSession();
+    res.json({ ...facture.toObject(), prestations: updatedPrestations });
 
-    res.json({ message: 'Facture rectifiée avec succès.', facture });
   } catch (error) {
     await session.abortTransaction();
+    console.error('Erreur rectification:', error);
+    res.status(500).json({ message: error.message });
+  } finally {
     session.endSession();
-    console.error('Erreur lors de la rectification de la facture:', error);
-    res.status(500).json({ message: 'Erreur serveur lors de la rectification.' });
   }
 });
 
 module.exports = router;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
