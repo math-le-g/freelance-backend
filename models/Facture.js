@@ -1,5 +1,42 @@
 const mongoose = require('mongoose');
 
+const PrestationModifieeSchema = new mongoose.Schema({
+  prestationId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Prestation',
+    required: true
+  },
+  type: {
+    type: String,
+    enum: ['MODIFIEE', 'AJOUTEE', 'SUPPRIMEE'],
+    required: true
+  },
+  anciensDetails: {
+    description: String,
+    billingType: String,
+    hours: Number,
+    hourlyRate: Number,
+    fixedPrice: Number,
+    duration: Number,
+    durationUnit: String,
+    total: Number,
+    date: Date,
+    quantity: Number
+  },
+  nouveauxDetails: {
+    description: String,
+    billingType: String,
+    hours: Number,
+    hourlyRate: Number,
+    fixedPrice: Number,
+    duration: Number,
+    durationUnit: String,
+    total: Number,
+    date: Date,
+    quantity: Number
+  }
+});
+
 const FactureSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
@@ -23,6 +60,66 @@ const FactureSchema = new mongoose.Schema({
       ref: 'Prestation',
     }
   ],
+
+  // Champs pour la rectification
+  isRectification: {
+    type: Boolean,
+    default: false
+  },
+  rectificationInfo: {
+    originalFactureId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Facture'
+    },
+    originalInvoiceNumber: {  // Ajout du numéro de facture original
+      type: Number,
+      required: function() {
+        return this.parent().isRectification === true;
+      }
+    },
+    motifLegal: {
+      type: String,
+      enum: [
+        'ERREUR_MONTANT',
+        'ERREUR_TVA',
+        'ERREUR_CLIENT',
+        'PRESTATION_MODIFIEE',
+        'REMISE_EXCEPTIONNELLE',
+        'AUTRE'
+      ]
+    },
+    detailsMotif: String,
+    dateRectification: {
+      type: Date,
+      default: Date.now
+    },
+    prestationsModifiees: [PrestationModifieeSchema],
+    differenceMontantHT: Number,
+    differenceTaxeURSSAF: Number,
+    differenceMontantNet: Number,
+    differenceMontantTTC: Number
+  },
+
+  rectifications: [{
+    factureId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Facture'
+    },
+    date: {
+      type: Date,
+      default: Date.now
+    },
+    motifLegal: String,
+    detailsMotif: String
+  }],
+
+  // Statut de validité
+  statut: {
+    type: String,
+    enum: ['VALIDE', 'ANNULEE', 'RECTIFIEE'],
+    default: 'VALIDE'
+  },
+
 
   // Montants
   montantHT: {
@@ -147,6 +244,10 @@ const FactureSchema = new mongoose.Schema({
       changesComment: String, // Motif de la rectification
     },
   ],
+  locked: {
+    type: Boolean,
+    default: false,
+  },
 
   // Détails du paiement
   methodePaiement: {
@@ -238,5 +339,60 @@ FactureSchema.methods.formatMontant = function () {
     currency: 'EUR'
   }).format(this.montantTTC);
 };
+
+// Ajouter une méthode pour créer une rectification
+FactureSchema.methods.createRectification = async function(motifLegal, detailsMotif) {
+  // Vérifier si la facture peut être rectifiée
+  if (this.statut === 'ANNULEE') {
+    throw new Error('Une facture annulée ne peut pas être rectifiée');
+  }
+
+  // Marquer cette facture comme rectifiée
+  this.statut = 'RECTIFIEE';
+  
+  // Ajouter l'entrée dans le tableau des rectifications
+  this.rectifications.push({
+    motifLegal,
+    detailsMotif,
+    date: new Date()
+  });
+
+  await this.save();
+  return this;
+};
+
+// Middleware pour la validation
+FactureSchema.pre('save', function(next) {
+  // Si c'est une rectification, certains champs sont obligatoires
+  if (this.isRectification && !this.rectificationInfo.originalFactureId) {
+    next(new Error('Une facture rectificative doit référencer la facture originale'));
+    return;
+  }
+
+  // Si le statut change à RECTIFIEE, vérifier qu'il y a bien une rectification liée
+  if (this.statut === 'RECTIFIEE' && this.rectifications.length === 0) {
+    next(new Error('Une facture rectifiée doit avoir au moins une rectification'));
+    return;
+  }
+
+  next();
+});
+
+// Méthode virtuelle pour obtenir le libellé du motif légal
+FactureSchema.virtual('motifLegalLibelle').get(function() {
+  const motifs = {
+    'ERREUR_MONTANT': 'Erreur sur les montants',
+    'ERREUR_TVA': 'Erreur de TVA',
+    'ERREUR_CLIENT': 'Erreur sur les informations client',
+    'PRESTATION_MODIFIEE': 'Modification des prestations',
+    'REMISE_EXCEPTIONNELLE': 'Application d\'une remise exceptionnelle',
+    'AUTRE': 'Autre motif'
+  };
+  
+  if (this.isRectification && this.rectificationInfo.motifLegal) {
+    return motifs[this.rectificationInfo.motifLegal] || this.rectificationInfo.motifLegal;
+  }
+  return null;
+});
 
 module.exports = mongoose.model('Facture', FactureSchema);

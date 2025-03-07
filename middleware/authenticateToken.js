@@ -21,11 +21,11 @@ const authenticateToken = async (req, res, next) => {
     }
 
     const token = authHeader.split(' ')[1];
-    console.log('Token extrait:', token);
+    // console.log('Token extrait:', token);
 
     try {
       const user = await jwtVerify(token, process.env.JWT_SECRET);
-      console.log('Token validé avec succès - Utilisateur:', user._id);
+      //console.log('Token validé avec succès - Utilisateur:', user._id);
       req.user = user;
       next();
     } catch (err) {

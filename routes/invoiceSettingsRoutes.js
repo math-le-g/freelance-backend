@@ -10,7 +10,7 @@ router.get('/', async (req, res) => {
     const userId = req.user._id;
     const businessInfo = await BusinessInfo.findOne({ user: userId });
 
-    console.log('Requête GET /api/invoice-settings - Utilisateur:', userId);
+    //console.log('Requête GET /api/invoice-settings - Utilisateur:', userId);
 
     if (!businessInfo) {
       console.log('Informations de l\'entreprise non trouvées pour l\'utilisateur:', userId);
