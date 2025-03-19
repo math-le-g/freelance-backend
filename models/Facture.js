@@ -1,4 +1,157 @@
 const mongoose = require('mongoose');
+const Schema = mongoose.Schema;
+
+const factureSchema = new Schema({
+  user: {
+    type: Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
+  },
+  client: {
+    type: Schema.Types.ObjectId,
+    ref: 'Client',
+    required: true
+  },
+  prestations: [{
+    type: Schema.Types.ObjectId,
+    ref: 'Prestation'
+  }],
+  montantHT: {
+    type: Number,
+    required: true
+  },
+  taxeURSSAF: {
+    type: Number,
+    required: true
+  },
+  montantNet: {
+    type: Number,
+    required: true
+  },
+  montantTVA: {
+    type: Number,
+    default: 0
+  },
+  montantTTC: {
+    type: Number,
+    default: 0
+  },
+  nombreHeures: {
+    type: Number,
+    default: 0
+  },
+  invoiceNumber: {
+    type: Number,
+    required: true
+  },
+  year: {
+    type: Number,
+    required: true
+  },
+  month: {
+    type: Number,
+    required: true
+  },
+  dateFacture: {
+    type: Date,
+    default: Date.now
+  },
+  dateEcheance: {
+    type: Date,
+    required: true
+  },
+  status: {
+    type: String,
+    enum: ['draft', 'unpaid', 'paid', 'overdue', 'cancelled'],
+    default: 'draft'
+  },
+  statut: {
+    type: String,
+    enum: ['VALIDE', 'RECTIFIEE', 'ANNULEE'],
+    default: 'VALIDE'
+  },
+  locked: {
+    type: Boolean,
+    default: false
+  },
+  // Nouveau champ pour suivre si la facture a été envoyée au client
+  isSentToClient: {
+    type: Boolean,
+    default: false
+  },
+  dateSent: {
+    type: Date
+  },
+  pdfPath: String,
+  datePaiement: Date,
+  methodePaiement: String,
+  commentairePaiement: String,
+  historiquePaiements: [{
+    date: Date,
+    montant: Number,
+    methode: String,
+    commentaire: String
+  }],
+  // Champs pour la gestion des rectifications
+  isRectification: {
+    type: Boolean,
+    default: false
+  },
+  rectificationInfo: {
+    originalFactureId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Facture'
+    },
+    originalInvoiceNumber: Number,
+    rectificationChain: [Schema.Types.ObjectId],
+    motifLegal: String,
+    detailsMotif: String,
+    dateRectification: Date,
+    prestationsModifiees: [Schema.Types.Mixed],
+    differenceMontantHT: Number,
+    differenceTaxeURSSAF: Number,
+    differenceMontantNet: Number,
+    differenceMontantTTC: Number
+  },
+  rectifications: [{
+    factureId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Facture'
+    },
+    date: Date,
+    motifLegal: String,
+    detailsMotif: String
+  }],
+  // Champs pour la gestion des avoirs
+  avoir: {
+    date: Date,
+    numero: String,
+    montant: Number,
+    motif: String,
+    remboursement: {
+      type: Boolean,
+      default: false
+    },
+    methodePaiement: String,
+    dateRemboursement: Date
+  },
+  // Champs pour l'annulation
+  annulation: {
+    date: Date,
+    motif: String,
+    commentaire: String,
+    userId: Schema.Types.ObjectId
+  },
+  // Versions précédentes (historique de modifications)
+  versions: [Schema.Types.Mixed]
+}, 
+{ timestamps: true });
+
+module.exports = mongoose.model('Facture', factureSchema);
+
+
+/*
+const mongoose = require('mongoose');
 
 const PrestationModifieeSchema = new mongoose.Schema({
   prestationId: {
@@ -77,6 +230,11 @@ const FactureSchema = new mongoose.Schema({
         return this.parent().isRectification === true;
       }
     },
+    rectificationChain: {
+      type: [mongoose.Schema.Types.ObjectId],
+      default: []
+    },
+
     motifLegal: {
       type: String,
       enum: [
@@ -119,7 +277,6 @@ const FactureSchema = new mongoose.Schema({
     enum: ['VALIDE', 'ANNULEE', 'RECTIFIEE'],
     default: 'VALIDE'
   },
-
 
   // Montants
   montantHT: {
@@ -180,9 +337,28 @@ const FactureSchema = new mongoose.Schema({
   // Statut
   status: {
     type: String,
-    enum: ['unpaid', 'paid', 'overdue'],
-    default: 'unpaid',
+    enum: ['draft','unpaid', 'paid', 'overdue', 'cancelled'],
+    default: 'draft',
     index: true,
+  },
+  isSentToClient: {
+    type: Boolean,
+    default: false
+  },
+  annulation: {
+    date: {
+      type: Date
+    },
+    motif: {
+      type: String
+    },
+    commentaire: {
+      type: String
+    },
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    }
   },
 
   // Chemin du PDF généré
@@ -259,10 +435,31 @@ const FactureSchema = new mongoose.Schema({
   datePaiement: {
     type: Date,
   },
+  // Définition améliorée de l'avoir avec validation
+  avoir: {
+    type: new mongoose.Schema({
+      date: { type: Date, required: true },
+      numero: { type: String, required: true },
+      montant: { type: Number, required: true },
+      motif: { type: String, required: true },
+      remboursement: { type: Boolean, default: false },
+      methodePaiement: { type: String },
+      dateRemboursement: { type: Date }
+    }),
+    default: undefined
+  },
 },
 {
   timestamps: true, // crée automatiquement createdAt, updatedAt
 });
+
+// Validation pour s'assurer qu'un avoir valide contient tous les champs nécessaires
+FactureSchema.path('avoir').validate(function(avoir) {
+  if (!avoir) return true; // L'avoir peut être null/undefined
+  
+  // Si l'avoir existe, il doit avoir au moins ces propriétés
+  return avoir.numero && avoir.montant && avoir.date && avoir.motif;
+}, 'Un avoir doit contenir numero, montant, date et motif');
 
 // Index composé pour les recherches fréquentes
 FactureSchema.index({ user: 1, status: 1, dateEcheance: 1 });
@@ -396,3 +593,4 @@ FactureSchema.virtual('motifLegalLibelle').get(function() {
 });
 
 module.exports = mongoose.model('Facture', FactureSchema);
+*/

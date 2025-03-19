@@ -1,5 +1,102 @@
-// backend/models/Prestation.js
+const mongoose = require('mongoose');
+const Schema = mongoose.Schema;
 
+const prestationSchema = new Schema({
+  user: {
+    type: Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
+  },
+  client: {
+    type: Schema.Types.ObjectId,
+    ref: 'Client',
+    required: true
+  },
+  date: {
+    type: Date,
+    required: true
+  },
+  description: {
+    type: String,
+    required: true
+  },
+  billingType: {
+    type: String,
+    enum: ['hourly', 'fixed'],
+    required: true
+  },
+  hours: {
+    type: Number
+  },
+  hourlyRate: {
+    type: Number
+  },
+  fixedPrice: {
+    type: Number
+  },
+  quantity: {
+    type: Number,
+    default: 1
+  },
+  duration: {
+    type: Number,
+    default: 0
+  },
+  durationUnit: {
+    type: String,
+    enum: ['minutes', 'hours', 'days'],
+    default: 'minutes'
+  },
+  total: {
+    type: Number,
+    required: true
+  },
+  invoiceId: {
+    type: Schema.Types.ObjectId,
+    ref: 'Facture',
+    default: null
+  },
+  invoicePaid: {
+    type: Boolean,
+    default: false
+  },
+  // Nouveaux champs pour suivi de rectifications
+  isReplaced: {
+    type: Boolean,
+    default: false
+  },
+  replacedByPrestationId: {
+    type: Schema.Types.ObjectId,
+    ref: 'Prestation',
+    default: null
+  },
+  originalPrestationId: {
+    type: Schema.Types.ObjectId,
+    ref: 'Prestation',
+    default: null
+  },
+  // Nouveaux champs pour accès rapide aux infos de facture
+  invoiceStatus: {
+    type: String,
+    enum: ['draft', 'unpaid', 'paid', 'overdue', 'cancelled', 'RECTIFIEE'],
+    default: null
+  },
+  invoiceIsSentToClient: {
+    type: Boolean,
+    default: false
+  },
+  invoiceLocked: {
+    type: Boolean,
+    default: false
+  }
+}, 
+{ timestamps: true });
+
+module.exports = mongoose.model('Prestation', prestationSchema);
+
+
+
+/*
 const mongoose = require('mongoose');
 
 const prestationSchema = new mongoose.Schema({
@@ -75,6 +172,28 @@ const prestationSchema = new mongoose.Schema({
   invoicePaid: {
     type: Boolean,
     default: false
+  },
+  
+  // Nouveaux champs pour la gestion des rectifications
+  
+  // Champ pour marquer une prestation comme remplacée par une rectification
+  isReplaced: {
+    type: Boolean,
+    default: false
+  },
+  
+  // Référence à la prestation originale (si c'est une prestation rectificative)
+  originalPrestationId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Prestation',
+    default: null
+  },
+  
+  // Référence à la prestation rectificative (si cette prestation a été remplacée)
+  replacedByPrestationId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Prestation',
+    default: null
   }
 }, {
   timestamps: true,
@@ -120,3 +239,4 @@ prestationSchema.pre('save', function (next) {
 });
 
 module.exports = mongoose.model('Prestation', prestationSchema);
+*/
