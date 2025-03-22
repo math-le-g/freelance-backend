@@ -79,8 +79,9 @@ router.post('/preview', [
     const montantTTC = parseFloat((montantHT + montantTVA).toFixed(2));
 
     const nextInvoiceNumber = await getNextInvoiceNumber(userId);
+    const paymentDelay = businessInfo.features?.invoiceStatus?.paymentDelay || 30;
     const dateEcheance = new Date(dateFacture);
-    dateEcheance.setDate(dateEcheance.getDate() + 30);
+    dateEcheance.setDate(dateEcheance.getDate() + paymentDelay);
 
     const factureTemp = {
       dateFacture,
@@ -89,8 +90,8 @@ router.post('/preview', [
       montantHT,
       taxeURSSAF,
       montantNet,
-      montantTVA,   // ajouté
-      montantTTC,   // ajouté
+      montantTVA,
+      montantTTC,
       invoiceNumber: nextInvoiceNumber,
       year: parseInt(year),
       month: parseInt(month),
@@ -111,11 +112,16 @@ router.post('/preview', [
   }
 });
 
-// Fonction utilitaire pour obtenir le prochain numéro de facture
 async function getNextInvoiceNumber(userId) {
-  const lastInvoice = await Facture.findOne({ user: userId })
-    .sort({ invoiceNumber: -1 });
-  return (lastInvoice?.invoiceNumber || 0) + 1;
+  const [lastInvoice, businessInfo] = await Promise.all([
+    Facture.findOne({ user: userId }).sort({ invoiceNumber: -1 }),
+    BusinessInfo.findOne({ user: userId })
+  ]);
+
+  const startNumber = businessInfo?.invoiceNumberStart || 1;
+  const lastNumber = lastInvoice?.invoiceNumber || 0;
+
+  return Math.max(startNumber, lastNumber + 1);
 }
 
 
@@ -450,7 +456,10 @@ router.delete('/:id', async (req, res) => {
       {
         $set: {
           invoiceId: null,
-          invoicePaid: false
+          invoicePaid: false,
+          invoiceStatus: null,
+          invoiceLocked: false,
+          invoiceIsSentToClient: false,
         }
       },
       { session }
@@ -886,6 +895,17 @@ router.post('/:id/rectify-new', async (req, res) => {
               quantity: oldP.quantity
             }
           });
+
+          // Mettre à jour la prestation pour qu'on sache qu'elle est supprimée
+          await Prestation.updateOne(
+            { _id: oldP._id },
+            {
+              $set: {
+                rectificationState: 'SUPPRIMEE'
+              }
+            },
+            { session }
+          );
         }
       }
     }
@@ -919,6 +939,7 @@ router.post('/:id/rectify-new', async (req, res) => {
       year: originalFacture.year,
       month: originalFacture.month,
       dateEcheance: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      status: 'draft',
       isRectification: true,
       rectificationInfo: {
         originalFactureId: originalFacture._id,
@@ -937,6 +958,19 @@ router.post('/:id/rectify-new', async (req, res) => {
 
     // 7) Créer la facture rectificative
     const [nouvelleFacture] = await Facture.create([rectificationData], { session });
+
+    await Prestation.updateMany(
+      { _id: { $in: nouvellesPrestations.map((np) => np._id) } },
+      {
+        $set: {
+          invoiceId: nouvelleFacture._id,
+          invoiceStatus: 'draft',
+          invoiceIsSentToClient: false,
+          invoiceLocked: false
+        }
+      },
+      { session }
+    );
 
     // 8) Verrouiller la facture originale
     await Prestation.updateMany(
@@ -999,304 +1033,6 @@ router.post('/:id/rectify-new', async (req, res) => {
     session.endSession();
   }
 });
-
-
-/*
-router.post('/:id/rectify-new', async (req, res) => {
-  // Définition immédiate de "id"
-  const { id } = req.params;
-  console.log('Démarrage rectification:', {
-    factureId: id,
-    motifLegal: req.body.motifLegal,
-    prestationsCount: req.body.prestations?.length
-  });
-
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
-  try {
-    const { motifLegal, detailsMotif, prestations } = req.body;
-    const userId = req.user._id;
-
-    // 1. Vérifications initiales
-    if (!motifLegal) {
-      throw new Error('Le motif légal est requis');
-    }
-    if (!prestations || !Array.isArray(prestations) || prestations.length === 0) {
-      throw new Error('Les prestations sont requises et doivent être un tableau non vide');
-    }
-
-    // 2. Récupérer la facture originale avec ses prestations et client
-    const originalFacture = await Facture.findOne({ _id: id, user: userId })
-      .populate('prestations')
-      .populate('client')
-      .session(session);
-    if (!originalFacture) {
-      throw new Error('Facture originale non trouvée');
-    }
-    if (originalFacture.status === 'paid') {
-      throw new Error('Cette facture ne peut pas être rectifiée');
-    }
-    console.log('Facture originale:', {
-      id: originalFacture._id,
-      invoiceNumber: originalFacture.invoiceNumber,
-      montantHT: originalFacture.montantHT
-    });
-
-    // 3. Récupérer le client et les informations d'entreprise
-    const client = await Client.findById(originalFacture.client._id).session(session);
-    const businessInfo = await BusinessInfo.findOne({ user: userId }).session(session);
-    if (!businessInfo) {
-      throw new Error('Informations de facturation non trouvées');
-    }
-
-    // 4. Traitement des prestations modifiées ou ajoutées
-    const prestationsModifiees = []; // Pour l'historique des modifications
-    const nouvellesPrestations = []; // Prestations à rattacher à la nouvelle facture
-    let montantHTTotal = 0;
-
-    for (const p of prestations) {
-      let newPrestation;
-      if (p._id && !p._id.startsWith('temp-')) {
-        // Ne pas modifier la prestation originale, mais créer une copie modifiée
-        const prestationOriginale = await Prestation.findById(p._id).session(session);
-        if (!prestationOriginale) {
-          throw new Error(`Prestation avec l'ID ${p._id} non trouvée`);
-        }
-
-        // Construire les données pour la nouvelle prestation basée sur l'originale
-        const nouvellePrestationData = {
-          user: userId,
-          client: client._id,
-          description: p.description !== undefined ? p.description : prestationOriginale.description,
-          billingType: p.billingType !== undefined ? p.billingType : prestationOriginale.billingType,
-          // Pour le cas horaire
-          hours: p.billingType === 'hourly' ? (p.hours !== undefined ? p.hours : prestationOriginale.hours) : undefined,
-          hourlyRate: p.billingType === 'hourly' ? (p.hourlyRate !== undefined ? p.hourlyRate : prestationOriginale.hourlyRate) : undefined,
-          // Pour le forfait
-          fixedPrice: p.billingType === 'fixed' ? (p.fixedPrice !== undefined ? p.fixedPrice : prestationOriginale.fixedPrice) : undefined,
-          quantity: p.billingType === 'fixed' ? (p.quantity !== undefined ? p.quantity : prestationOriginale.quantity) : undefined,
-          // Champs communs
-          duration: p.duration !== undefined ? p.duration : prestationOriginale.duration,
-          durationUnit: p.durationUnit || prestationOriginale.durationUnit,
-          date: p.date !== undefined ? p.date : prestationOriginale.date,
-          total: p.total !== undefined ? p.total : prestationOriginale.total,
-          // Créer une nouvelle prestation, pas liée à la facture originale
-          invoiceId: null,
-          // Nouvelles propriétés pour la gestion des rectifications
-          originalPrestationId: prestationOriginale._id
-        };
-
-        // Créer une NOUVELLE prestation au lieu de modifier l'originale
-        newPrestation = (await Prestation.create([nouvellePrestationData], { session }))[0];
-
-        // Marquer la prestation originale comme remplacée
-        await Prestation.findByIdAndUpdate(
-          prestationOriginale._id,
-          {
-            isReplaced: true,
-            replacedByPrestationId: newPrestation._id
-          },
-          { session }
-        );
-
-        prestationsModifiees.push({
-          prestationId: prestationOriginale._id,
-          type: 'MODIFIEE',
-          anciensDetails: {
-            description: prestationOriginale.description,
-            billingType: prestationOriginale.billingType,
-            hours: prestationOriginale.hours,
-            hourlyRate: prestationOriginale.hourlyRate,
-            fixedPrice: prestationOriginale.fixedPrice,
-            duration: prestationOriginale.duration,
-            durationUnit: prestationOriginale.durationUnit,
-            total: prestationOriginale.total,
-            date: prestationOriginale.date,
-            quantity: prestationOriginale.quantity
-          },
-          nouveauxDetails: {
-            ...nouvellePrestationData,
-            _id: newPrestation._id
-          }
-        });
-      } else {
-        // Nouvelle prestation (code inchangé)
-
-        newPrestation = (await Prestation.create([{
-          user: userId,
-          client: client._id,
-          date: p.date,
-          description: p.description,
-          billingType: p.billingType,
-          hours: p.billingType === 'hourly' ? p.hours || 0 : undefined,
-          hourlyRate: p.billingType === 'hourly' ? p.hourlyRate || 0 : undefined,
-          fixedPrice: p.billingType === 'fixed' ? p.fixedPrice || 0 : undefined,
-          quantity: p.billingType === 'fixed' ? p.quantity || 1 : undefined,
-          duration: p.duration || 0,
-          durationUnit: p.durationUnit || 'minutes',
-          total: p.total || 0,
-          invoiceId: null,
-          // Pas de originalPrestationId pour une nouvelle prestation
-        }], { session }))[0];
-        prestationsModifiees.push({
-          prestationId: newPrestation._id,
-          type: 'AJOUTEE',
-          nouveauxDetails: {
-            description: newPrestation.description,
-            billingType: newPrestation.billingType,
-            hours: newPrestation.hours,
-            hourlyRate: newPrestation.hourlyRate,
-            fixedPrice: newPrestation.fixedPrice,
-            duration: newPrestation.duration,
-            durationUnit: newPrestation.durationUnit,
-            total: newPrestation.total,
-            date: newPrestation.date,
-            quantity: newPrestation.quantity
-          }
-        });
-      }
-      nouvellesPrestations.push(newPrestation);
-      montantHTTotal += newPrestation.total;
-    }
-
-    // 5. Calcul des nouveaux montants
-    const taxRate = businessInfo.taxeURSSAF || 0.246;
-    const tauxTVA = businessInfo.tauxTVA || 0;
-    const taxeURSSAF = parseFloat((montantHTTotal * taxRate).toFixed(2));
-    const montantNet = parseFloat((montantHTTotal - taxeURSSAF).toFixed(2));
-    const montantTVA = parseFloat((montantHTTotal * tauxTVA).toFixed(2));
-    const montantTTC = parseFloat((montantHTTotal + montantTVA).toFixed(2));
-
-    // 6. Création de la nouvelle facture rectificative
-
-    let rectificationChain = [];
-
-    if (originalFacture.isRectification && originalFacture.rectificationInfo.rectificationChain) {
-      rectificationChain = [...originalFacture.rectificationInfo.rectificationChain];
-    }
-
-    rectificationChain.push(originalFacture._id);
-
-
-    const rectificationData = {
-      user: userId,
-      client: client._id,
-      dateFacture: new Date(),
-      prestations: nouvellesPrestations.map(p => p._id),
-      montantHT: montantHTTotal,
-      taxeURSSAF,
-      montantNet,
-      montantTVA,
-      montantTTC,
-      invoiceNumber: await getNextInvoiceNumber(userId),
-      year: originalFacture.year,
-      month: originalFacture.month,
-      dateEcheance: new Date(Date.now() + (30 * 24 * 60 * 60 * 1000)),
-      isRectification: true,
-      rectificationInfo: {
-        originalFactureId: originalFacture._id,
-        originalInvoiceNumber: originalFacture.invoiceNumber,
-        rectificationChain,
-        motifLegal,
-        detailsMotif: detailsMotif || motifLegal,
-        dateRectification: originalFacture.dateFacture,
-        prestationsModifiees,
-        differenceMontantHT: parseFloat((montantHTTotal - originalFacture.montantHT).toFixed(2)),
-        differenceTaxeURSSAF: parseFloat((taxeURSSAF - originalFacture.taxeURSSAF).toFixed(2)),
-        differenceMontantNet: parseFloat((montantNet - originalFacture.montantNet).toFixed(2)),
-        differenceMontantTTC: parseFloat((montantTTC - originalFacture.montantTTC).toFixed(2))
-      }
-    };
-
-    console.log('Données de rectification:', {
-      originalInvoiceNumber: rectificationData.rectificationInfo.originalInvoiceNumber,
-      differenceMontantHT: rectificationData.rectificationInfo.differenceMontantHT
-    });
-
-    const nouvelleFacture = await Facture.create([rectificationData], { session });
-
-    // 7. Mise à jour de la facture originale : marquer comme RECTIFIEE et verrouiller
-    await Prestation.updateMany(
-      { invoiceId: originalFacture._id },
-      {
-        $set: {
-          invoiceStatus: 'RECTIFIEE',
-          invoiceLocked: true
-        }
-      },
-      { session }
-    );
-
-    // Mise à jour de la facture originale : marquer comme RECTIFIEE et verrouiller
-    // En utilisant findByIdAndUpdate pour éviter tout effet de bord
-    await Facture.findByIdAndUpdate(
-      originalFacture._id,
-      {
-        $set: {
-          statut: 'RECTIFIEE',
-          locked: true
-        },
-        $push: {
-          rectifications: {
-            factureId: nouvelleFacture[0]._id,
-            date: new Date(),
-            motifLegal,
-            detailsMotif
-          }
-        }
-      },
-      { session }
-    );
-
-    // 8. Génération du PDF de la nouvelle facture
-    const pdfBuffer = await generateInvoicePDF(nouvelleFacture[0], client, businessInfo, nouvellesPrestations);
-
-    // 9. Sauvegarde du PDF sur le serveur
-    const pdfDir = path.join(__dirname, '../public/uploads/invoices');
-    if (!fs.existsSync(pdfDir)) {
-      fs.mkdirSync(pdfDir, { recursive: true });
-    }
-    const fileName = `Facture_${sanitizeClientName(client.name)}_Rectificative_${nouvelleFacture[0].invoiceNumber}_${Date.now()}.pdf`;
-    const filePath = path.join(pdfDir, fileName);
-    const pdfPath = `uploads/invoices/${fileName}`;
-    fs.writeFileSync(filePath, pdfBuffer);
-    nouvelleFacture[0].pdfPath = pdfPath;
-    await nouvelleFacture[0].save({ session });
-
-    // 10. Mise à jour du numéro de facture dans BusinessInfo (optionnel)
-    businessInfo.currentInvoiceNumber = rectificationData.invoiceNumber;
-    await businessInfo.save({ session });
-
-    // 11. Commit de la transaction et fin de la session
-    await session.commitTransaction();
-    session.endSession();
-
-    console.log('Rectification terminée avec succès:', {
-      nouvelleFactureId: nouvelleFacture[0]._id,
-      nouvelleFactureNumber: nouvelleFacture[0].invoiceNumber
-    });
-
-    res.status(201).json({
-      message: 'Facture rectificative créée avec succès',
-      facture: nouvelleFacture[0]
-    });
-  } catch (error) {
-    await session.abortTransaction();
-    console.error('Erreur création facture rectificative:', error);
-    res.status(500).json({
-      message: 'Erreur lors de la création de la facture rectificative',
-      error: error.message
-    });
-  } finally {
-    session.endSession();
-  }
-});
-*/
-
-
-
-////////////////////////////////////////////////////////////////////////////////////////////////
 
 
 /**
@@ -1416,7 +1152,7 @@ router.get('/:id/relations', async (req, res) => {
         facture.rectificationInfo.rectificationChain.length > 0) {
         result.rectificationChain = facture.rectificationInfo.rectificationChain;
       }
-      
+
       // Ajouter les prestations modifiées si elles existent
       if (facture.rectificationInfo.prestationsModifiees &&
         facture.rectificationInfo.prestationsModifiees.length > 0) {

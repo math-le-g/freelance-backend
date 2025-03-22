@@ -1,4 +1,3 @@
-
 const PDFDocument = require('pdfkit');
 const { format } = require('date-fns');
 const { fr } = require('date-fns/locale');
@@ -159,36 +158,36 @@ function addPrestations(doc, prestations, marginLeft, y, maxY, marginTop) {
 
 function drawRectificationInfo(doc, rectificationInfo, x, y, maxY, marginTop) {
   const margin = 10;
-  // Espacement initial légèrement réduit
+  // Espacement initial
   y += 5;
-  
+
+  // Réduire l'espace horizontal entre labels et valeurs
+  const labelValueGap = 100; // Réduit de 140 à 100
+
   doc.font('Helvetica-Bold').fontSize(12);
   doc.text('NATURE DES MODIFICATIONS', x, y, { align: 'left' });
-  y += 20; // Réduit de 25 à 20
+  y += 20;
 
   doc.moveTo(x, y - 10).lineTo(x + 500, y - 10).stroke();
 
-  // Filtre pour ne montrer que les prestations avec des modifications réelles
   const prestationsAjoutees = rectificationInfo.prestationsModifiees?.filter(m => m.type === 'AJOUTEE') || [];
-  
-  // Pour les prestations modifiées, vérifier qu'il y a une différence réelle
+
   const prestationsModifiees = rectificationInfo.prestationsModifiees?.filter(m => {
     if (m.type !== 'MODIFIEE') return false;
-    
-    // Vérifier si des changements existent entre avant et après
+
     const old = m.anciensDetails;
     const new_ = m.nouveauxDetails;
-    
+
     return old.description !== new_.description ||
-           old.billingType !== new_.billingType ||
-           parseFloat(old.hourlyRate || 0) !== parseFloat(new_.hourlyRate || 0) ||
-           parseFloat(old.fixedPrice || 0) !== parseFloat(new_.fixedPrice || 0) ||
-           parseInt(old.quantity || 1) !== parseInt(new_.quantity || 1) ||
-           parseInt(old.duration || 0) !== parseInt(new_.duration || 0) ||
-           old.durationUnit !== new_.durationUnit ||
-           parseFloat(old.total || 0) !== parseFloat(new_.total || 0);
+      old.billingType !== new_.billingType ||
+      parseFloat(old.hourlyRate || 0) !== parseFloat(new_.hourlyRate || 0) ||
+      parseFloat(old.fixedPrice || 0) !== parseFloat(new_.fixedPrice || 0) ||
+      parseInt(old.quantity || 1) !== parseInt(new_.quantity || 1) ||
+      parseInt(old.duration || 0) !== parseInt(new_.duration || 0) ||
+      old.durationUnit !== new_.durationUnit ||
+      parseFloat(old.total || 0) !== parseFloat(new_.total || 0);
   }) || [];
-  
+
   const prestationsSupprimees = rectificationInfo.prestationsModifiees?.filter(m => m.type === 'SUPPRIMEE') || [];
 
   // Affichage des prestations ajoutées
@@ -196,7 +195,7 @@ function drawRectificationInfo(doc, rectificationInfo, x, y, maxY, marginTop) {
     doc.font('Helvetica-Bold').fontSize(11);
     doc.text(`1. Ajout de prestations (${prestationsAjoutees.length})`, x, y);
     doc.font('Helvetica').fontSize(11);
-    y += 20; // Réduit de 25 à 20
+    y += 20;
 
     for (let index = 0; index < prestationsAjoutees.length; index++) {
       const modif = prestationsAjoutees[index];
@@ -205,24 +204,24 @@ function drawRectificationInfo(doc, rectificationInfo, x, y, maxY, marginTop) {
       const descriptionText = `"${modif.nouveauxDetails.description}"`;
       const descriptionWidth = 350;
       const descriptionHeight = doc.heightOfString(descriptionText, { width: descriptionWidth });
-      
-      // Calculer la hauteur totale nécessaire en fonction des champs présents
-      let detailsHeight = 0;
+
+      // Calcul dynamique de la hauteur nécessaire
+      let requiredContentHeight = 25; // Titre
+      requiredContentHeight += Math.max(descriptionHeight, 15); // Libellé
+
       if (modif.nouveauxDetails.billingType === 'hourly' && modif.nouveauxDetails.hourlyRate) {
-        detailsHeight += 15;
+        requiredContentHeight += 15; // Taux horaire
       }
-      if (modif.nouveauxDetails.billingType !== 'hourly' && modif.nouveauxDetails.fixedPrice) {
-        detailsHeight += 15;
-      }
-      if (modif.nouveauxDetails.billingType !== 'hourly' && modif.nouveauxDetails.quantity) {
-        detailsHeight += 15;
+      if (modif.nouveauxDetails.billingType !== 'hourly') {
+        if (modif.nouveauxDetails.fixedPrice) requiredContentHeight += 15; // Prix unitaire
+        if (modif.nouveauxDetails.quantity) requiredContentHeight += 15; // Quantité
       }
       if (modif.nouveauxDetails.duration) {
-        detailsHeight += 15;
+        requiredContentHeight += 15; // Durée
       }
-      
-      // S'assurer que la boîte est suffisamment grande - ajouté +20 pour sécurité
-      const boxHeight = 30 + Math.max(descriptionHeight, 15) + detailsHeight + (margin * 2) + 20;
+
+      // Hauteur de la boîte colorée s'adapte au contenu
+      const boxHeight = requiredContentHeight + (margin * 2);
 
       if (y + boxHeight > maxY) {
         doc.addPage();
@@ -243,68 +242,95 @@ function drawRectificationInfo(doc, rectificationInfo, x, y, maxY, marginTop) {
 
       let detailY = y + margin + 25;
       doc.text("Libellé:", x + margin * 2, detailY);
-      doc.text(descriptionText, x + 140, detailY, { width: descriptionWidth });
+      doc.text(descriptionText, x + labelValueGap, detailY, { width: descriptionWidth });
       detailY += Math.max(descriptionHeight, 15);
 
       if (modif.nouveauxDetails.billingType === 'hourly') {
         if (modif.nouveauxDetails.hourlyRate) {
           doc.text("Taux horaire:", x + margin * 2, detailY);
-          doc.text(`${modif.nouveauxDetails.hourlyRate}€/h`, x + 140, detailY);
+          doc.text(`${modif.nouveauxDetails.hourlyRate}€/h`, x + labelValueGap, detailY);
           detailY += 15;
         }
       } else {
         if (modif.nouveauxDetails.fixedPrice) {
           doc.text("Prix unitaire:", x + margin * 2, detailY);
-          doc.text(`${modif.nouveauxDetails.fixedPrice}€`, x + 140, detailY);
+          doc.text(`${modif.nouveauxDetails.fixedPrice}€`, x + labelValueGap, detailY);
           detailY += 15;
         }
         if (modif.nouveauxDetails.quantity) {
           doc.text("Quantité:", x + margin * 2, detailY);
-          doc.text(`${modif.nouveauxDetails.quantity}`, x + 140, detailY);
+          doc.text(`${modif.nouveauxDetails.quantity}`, x + labelValueGap, detailY);
           detailY += 15;
         }
       }
 
       if (modif.nouveauxDetails.duration) {
-        // Utilisation de formatDuration (qui appelle formatPrestationDuration)
         const formattedDuration = formatDuration({
           duration: modif.nouveauxDetails.duration,
           durationUnit: modif.nouveauxDetails.durationUnit || 'minutes'
         });
         doc.text("Durée:", x + margin * 2, detailY);
-        doc.text(formattedDuration, x + 140, detailY);
+        doc.text(formattedDuration, x + labelValueGap, detailY);
       }
 
-      y += boxHeight + 10; // Réduit de 15 à 10
+      y += boxHeight + 10;
     }
-    y += 5; // Réduit de 10 à 5
+    y += 5;
   }
 
-  // BLOC: Affichage des prestations modifiées
+  // Affichage des prestations modifiées
   if (prestationsModifiees.length > 0) {
     const sectionNumber = prestationsAjoutees.length > 0 ? 2 : 1;
     doc.font('Helvetica-Bold').fontSize(11);
     doc.text(`${sectionNumber}. Modifications de prestations (${prestationsModifiees.length})`, x, y);
     doc.font('Helvetica').fontSize(11);
-    y += 20; // Réduit de 25 à 20
+    y += 20;
 
     for (let index = 0; index < prestationsModifiees.length; index++) {
       const modif = prestationsModifiees[index];
       const date = safeFormatDate(modif.anciensDetails.date);
       const titleText = `${index + 1}. Modification prestation du ${date}`;
-      
-      // Calcul de la hauteur pour les détails avant et après
+
+      // Calcul précis de l'espace nécessaire pour chaque élément
       const oldDescriptionText = `"${modif.anciensDetails.description}"`;
       const newDescriptionText = `"${modif.nouveauxDetails.description}"`;
       const descriptionWidth = 350;
       const oldDescriptionHeight = doc.heightOfString(oldDescriptionText, { width: descriptionWidth });
       const newDescriptionHeight = doc.heightOfString(newDescriptionText, { width: descriptionWidth });
-      
-      // Hauteur minimale pour les détails - couvre toutes les propriétés possibles
-      let detailsHeight = 100; // Augmenté pour s'assurer que tout rentre dans la boîte
-      
-      // Hauteur totale de la boîte - augmentée pour éviter les problèmes
-      const boxHeight = 50 + Math.max(oldDescriptionHeight, 15) + Math.max(newDescriptionHeight, 15) + detailsHeight + (margin * 2);
+
+      // Calcul dynamique de la hauteur requise
+      let requiredContentHeight = 25; // Titre
+
+      // Section AVANT
+      requiredContentHeight += 15; // Label "AVANT:"
+      requiredContentHeight += Math.max(oldDescriptionHeight, 15); // Libellé AVANT
+
+      if (modif.anciensDetails.billingType === 'hourly') {
+        requiredContentHeight += 15; // Taux horaire AVANT
+      } else {
+        if (modif.anciensDetails.fixedPrice) requiredContentHeight += 15; // Prix unitaire AVANT
+        if (modif.anciensDetails.quantity) requiredContentHeight += 15; // Quantité AVANT
+      }
+
+      // Espacement entre AVANT et APRÈS
+      requiredContentHeight += 10;
+
+      // Section APRÈS
+      requiredContentHeight += 15; // Label "APRÈS:"
+      requiredContentHeight += Math.max(newDescriptionHeight, 15); // Libellé APRÈS
+
+      if (modif.nouveauxDetails.billingType === 'hourly') {
+        requiredContentHeight += 15; // Taux horaire APRÈS
+      } else {
+        if (modif.nouveauxDetails.fixedPrice) requiredContentHeight += 15; // Prix unitaire APRÈS
+        if (modif.nouveauxDetails.quantity) requiredContentHeight += 15; // Quantité APRÈS
+      }
+
+      // Ligne pour la différence
+      requiredContentHeight += 20;
+
+      // Hauteur totale de la boîte - s'adapte dynamiquement au contenu
+      const boxHeight = requiredContentHeight + (margin * 2);
 
       if (y + boxHeight > maxY) {
         doc.addPage();
@@ -333,81 +359,82 @@ function drawRectificationInfo(doc, rectificationInfo, x, y, maxY, marginTop) {
       doc.text("AVANT:", x + margin, detailY);
       doc.fillColor('#000000');
       doc.font('Helvetica').fontSize(10);
-      
+
       detailY += 15;
       doc.text("Libellé:", x + margin * 2, detailY);
-      doc.text(oldDescriptionText, x + 140, detailY, { width: descriptionWidth });
+      doc.text(oldDescriptionText, x + labelValueGap, detailY, { width: descriptionWidth });
       detailY += Math.max(oldDescriptionHeight, 15);
 
       if (modif.anciensDetails.billingType === 'hourly') {
         doc.text("Taux horaire:", x + margin * 2, detailY);
-        doc.text(`${modif.anciensDetails.hourlyRate}€/h`, x + 140, detailY);
+        doc.text(`${modif.anciensDetails.hourlyRate}€/h`, x + labelValueGap, detailY);
         detailY += 15;
       } else {
         doc.text("Prix unitaire:", x + margin * 2, detailY);
-        doc.text(`${modif.anciensDetails.fixedPrice}€`, x + 140, detailY);
+        doc.text(`${modif.anciensDetails.fixedPrice}€`, x + labelValueGap, detailY);
         detailY += 15;
-        
+
         doc.text("Quantité:", x + margin * 2, detailY);
-        doc.text(`${modif.anciensDetails.quantity || 1}`, x + 140, detailY);
+        doc.text(`${modif.anciensDetails.quantity || 1}`, x + labelValueGap, detailY);
         detailY += 15;
       }
 
-      // Section "Après" - espacement réduit
-      detailY += 5; // Réduit de 10 à 5
+      // Section "Après"
+      detailY += 5;
       doc.font('Helvetica-Bold').fontSize(10);
       doc.fillColor('#007E33');
       doc.text("APRÈS:", x + margin, detailY);
       doc.fillColor('#000000');
       doc.font('Helvetica').fontSize(10);
-      
+
       detailY += 15;
       doc.text("Libellé:", x + margin * 2, detailY);
-      doc.text(newDescriptionText, x + 140, detailY, { width: descriptionWidth });
+      doc.text(newDescriptionText, x + labelValueGap, detailY, { width: descriptionWidth });
       detailY += Math.max(newDescriptionHeight, 15);
 
       if (modif.nouveauxDetails.billingType === 'hourly') {
         doc.text("Taux horaire:", x + margin * 2, detailY);
-        doc.text(`${modif.nouveauxDetails.hourlyRate}€/h`, x + 140, detailY);
+        doc.text(`${modif.nouveauxDetails.hourlyRate}€/h`, x + labelValueGap, detailY);
         detailY += 15;
       } else {
         doc.text("Prix unitaire:", x + margin * 2, detailY);
-        doc.text(`${modif.nouveauxDetails.fixedPrice}€`, x + 140, detailY);
+        doc.text(`${modif.nouveauxDetails.fixedPrice}€`, x + labelValueGap, detailY);
         detailY += 15;
-        
+
         doc.text("Quantité:", x + margin * 2, detailY);
-        doc.text(`${modif.nouveauxDetails.quantity || 1}`, x + 140, detailY);
+        doc.text(`${modif.nouveauxDetails.quantity || 1}`, x + labelValueGap, detailY);
         detailY += 15;
       }
 
-      // Différence de montant - CRUCIAL: toujours l'afficher pour chaque prestation modifiée
+      // Différence de montant
       const oldTotal = parseFloat(modif.anciensDetails.total || 0);
       const newTotal = parseFloat(modif.nouveauxDetails.total || 0);
       const diff = newTotal - oldTotal;
-      
-      // Position et style amélioré pour la différence
-      detailY += 5; // Ajusté pour mieux placer la différence
+
+      detailY += 5;
       doc.font('Helvetica-Bold').fontSize(10);
       doc.fillColor(diff >= 0 ? '#007E33' : '#a71d2a');
-      // Positionner la différence pour qu'elle soit visible et alignée à droite
       doc.text(`Différence: ${diff >= 0 ? '+' : ''}${diff.toFixed(2)}€`, x + 350, detailY, { align: 'right' });
       doc.fillColor('#000000');
 
-      y += boxHeight + 10; // Réduit pour moins d'espacement entre les prestations
+      y += boxHeight + 10;
     }
-    y += 5; // Réduit pour moins d'espacement après la section
+    y += 5;
   }
+
+  // Le reste de la fonction reste essentiellement le même, avec la mise à jour de labelValueGap
+  // pour les prestations supprimées aussi...
 
   // Bloc pour prestations supprimées
   if (prestationsSupprimees.length > 0) {
     let sectionNumber = 1;
     if (prestationsAjoutees.length > 0) sectionNumber++;
     if (prestationsModifiees.length > 0) sectionNumber++;
-    
+
     doc.font('Helvetica-Bold').fontSize(11);
     doc.text(`${sectionNumber}. Prestations supprimées (${prestationsSupprimees.length})`, x, y);
     doc.font('Helvetica').fontSize(11);
-    y += 20; // Réduit pour moins d'espacement
+    y += 20;
 
     for (let index = 0; index < prestationsSupprimees.length; index++) {
       const modif = prestationsSupprimees[index];
@@ -416,12 +443,23 @@ function drawRectificationInfo(doc, rectificationInfo, x, y, maxY, marginTop) {
       const descriptionText = `"${modif.anciensDetails.description}"`;
       const descriptionWidth = 350;
       const descriptionHeight = doc.heightOfString(descriptionText, { width: descriptionWidth });
-      
-      // Hauteur pour les autres détails - augmentée pour s'assurer que tout rentre
-      let detailsHeight = 50;
-      
-      // Hauteur totale de la boîte - augmentée pour éviter les problèmes d'affichage
-      const boxHeight = 40 + Math.max(descriptionHeight, 15) + detailsHeight + (margin * 2);
+
+      // Calcul dynamique de la hauteur requise
+      let requiredContentHeight = 25; // Titre
+      requiredContentHeight += Math.max(descriptionHeight, 15); // Libellé
+
+      if (modif.anciensDetails.billingType === 'hourly') {
+        requiredContentHeight += 15; // Taux horaire
+      } else {
+        if (modif.anciensDetails.fixedPrice) requiredContentHeight += 15; // Prix unitaire
+        if (modif.anciensDetails.quantity) requiredContentHeight += 15; // Quantité
+      }
+
+      // Ligne pour la différence
+      requiredContentHeight += 20;
+
+      // Hauteur totale de la boîte - s'adapte au contenu
+      const boxHeight = requiredContentHeight + (margin * 2);
 
       if (y + boxHeight > maxY) {
         doc.addPage();
@@ -444,35 +482,35 @@ function drawRectificationInfo(doc, rectificationInfo, x, y, maxY, marginTop) {
 
       let detailY = y + margin + 25;
       doc.text("Libellé:", x + margin * 2, detailY);
-      doc.text(descriptionText, x + 140, detailY, { width: descriptionWidth });
+      doc.text(descriptionText, x + labelValueGap, detailY, { width: descriptionWidth });
       detailY += Math.max(descriptionHeight, 15);
 
       if (modif.anciensDetails.billingType === 'hourly') {
         doc.text("Taux horaire:", x + margin * 2, detailY);
-        doc.text(`${modif.anciensDetails.hourlyRate}€/h`, x + 140, detailY);
+        doc.text(`${modif.anciensDetails.hourlyRate}€/h`, x + labelValueGap, detailY);
         detailY += 15;
       } else {
         doc.text("Prix unitaire:", x + margin * 2, detailY);
-        doc.text(`${modif.anciensDetails.fixedPrice}€`, x + 140, detailY);
+        doc.text(`${modif.anciensDetails.fixedPrice}€`, x + labelValueGap, detailY);
         detailY += 15;
-        
+
         doc.text("Quantité:", x + margin * 2, detailY);
-        doc.text(`${modif.anciensDetails.quantity || 1}`, x + 140, detailY);
+        doc.text(`${modif.anciensDetails.quantity || 1}`, x + labelValueGap, detailY);
         detailY += 15;
       }
 
       // Différence de montant (toujours négative pour une suppression)
       const oldTotal = parseFloat(modif.anciensDetails.total || 0);
-      
-      detailY += 5; // Réduit pour moins d'espacement
+
+      detailY += 5;
       doc.font('Helvetica-Bold').fontSize(10);
       doc.fillColor('#a71d2a');
       doc.text(`Différence: -${oldTotal.toFixed(2)}€`, x + 350, detailY, { align: 'right' });
       doc.fillColor('#000000');
 
-      y += boxHeight + 10; // Réduit pour moins d'espacement entre les prestations
+      y += boxHeight + 10;
     }
-    y += 5; // Réduit pour moins d'espacement après la section
+    y += 5;
   }
 
   // Message par défaut si aucune prestation modifiée
@@ -566,6 +604,75 @@ function drawRecapitulatif(doc, facture, businessInfo, x, y) {
       { width: 280, align: 'right' }
     );
   }
+}
+
+function drawMessages(doc, facture, businessInfo, x, y, maxY, marginTop) {
+  // Si aucun message n'est activé, ne rien faire
+  if (!businessInfo.legalMessages?.enableLatePaymentComment &&
+    !businessInfo.legalMessages?.enableCustomComment) {
+    return y;
+  }
+
+  let messageAdded = false;
+
+  // Ajouter le message de retard de paiement s'il est activé
+  if (businessInfo.legalMessages?.enableLatePaymentComment &&
+    businessInfo.legalMessages?.latePaymentText) {
+
+    // Vérifier s'il faut passer à une nouvelle page
+    if (y + 80 > maxY) {
+      doc.addPage();
+      y = marginTop;
+    }
+
+    // Fond gris clair pour mettre en évidence le texte légal
+    doc.fillColor('#f8f9fa');
+    doc.rect(x, y, 500, 50).fill();
+    doc.fillColor('#000000');
+
+    // Titre du message légal
+    doc.font('Helvetica-Bold').fontSize(11);
+    doc.text('INFORMATIONS LÉGALES', x + 10, y + 10);
+
+    // Contenu du message légal
+    doc.font('Helvetica').fontSize(10);
+    const legalText = businessInfo.legalMessages.latePaymentText;
+    const textHeight = doc.heightOfString(legalText, { width: 480 });
+    doc.text(legalText, x + 10, y + 25, { width: 480 });
+
+    y += Math.max(50, textHeight + 30);
+    messageAdded = true;
+  }
+
+  // Ajouter le commentaire personnalisé s'il est activé
+  if (businessInfo.legalMessages?.enableCustomComment &&
+    businessInfo.legalMessages?.customCommentText) {
+
+    // Vérifier s'il faut passer à une nouvelle page
+    if (y + 80 > maxY) {
+      doc.addPage();
+      y = marginTop;
+    }
+
+    // Fond gris clair pour le commentaire personnalisé
+    doc.fillColor('#f8f9fa');
+    doc.rect(x, y, 500, 50).fill();
+    doc.fillColor('#000000');
+
+    // Titre du commentaire personnalisé
+    doc.font('Helvetica-Bold').fontSize(11);
+    doc.text('NOTE', x + 10, y + 10);
+
+    // Contenu du commentaire personnalisé
+    doc.font('Helvetica').fontSize(10);
+    const customText = businessInfo.legalMessages.customCommentText;
+    const textHeight = doc.heightOfString(customText, { width: 480 });
+    doc.text(customText, x + 10, y + 25, { width: 480 });
+
+    y += Math.max(50, textHeight + 30);
+  }
+
+  return y;  // Retourner la nouvelle position verticale
 }
 
 const generateInvoicePDF = async (facture, client, businessInfo, prestations) => {
@@ -733,7 +840,11 @@ const generateInvoicePDF = async (facture, client, businessInfo, prestations) =>
         }
         doc.font('Helvetica').fontSize(12);
         doc.text(`Date d'échéance : ${format(new Date(facture.dateEcheance), 'dd/MM/yyyy', { locale: fr })}`, marginLeft, y);
+        y += 30;
       }
+
+      // Ajouter les messages légaux et commentaires personnalisés
+      y = drawMessages(doc, facture, businessInfo, marginLeft, y, maxY, marginTop);
 
       // Filigrane pour facture annulée
       if (facture.status === 'cancelled') {

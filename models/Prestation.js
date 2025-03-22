@@ -88,7 +88,12 @@ const prestationSchema = new Schema({
   invoiceLocked: {
     type: Boolean,
     default: false
-  }
+  },
+  rectificationState: {
+    type: String,
+    enum: ['SUPPRIMEE', 'MODIFIEE', 'AJOUTEE', null],
+    default: null
+  },
 }, 
 { timestamps: true });
 
